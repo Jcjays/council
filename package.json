@@ -1,0 +1,24 @@
+{
+  "name": "council",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local router that puts Claude, Codex and Gemini to work on one project, by council vote, in separate git worktrees, with per-provider budget tracking.",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "workspaces": [
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,client -c blue,green \"npm -w server run dev\" \"npm -w client run dev\"",
+    "build": "npm -w server run build && npm -w client run build",
+    "test": "npm -w server test",
+    "e2e": "npm -w server run e2e",
+    "start": "node server/dist/index.js"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}
