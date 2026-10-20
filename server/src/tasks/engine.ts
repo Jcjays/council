@@ -8,6 +8,7 @@ import { budgetState, type BudgetState } from '../ledger/budget.js';
 import { appendEntry, currentPeriod, readEntries, sumPeriod } from '../ledger/ledger.js';
 import { costFor, lookupPrice, type PriceTable } from '../ledger/pricing.js';
 import type { MergeResult, WorktreeOps } from '../worktrees/manager.js';
+import { clipText, clipValue } from './clip.js';
 import { buildHandoffPrompt, buildRebasePrompt, buildSummaryPrompt, mechanicalSummary } from './handoff.js';
 import { canEscalate, transition, type TabStatus } from './state.js';
 import { newId, newTab, type TabStore } from './store.js';
@@ -36,7 +37,13 @@ export interface WorkerPick {
 interface ActiveRun {
   ac: AbortController;
   stallTimer?: NodeJS.Timeout;
+  /** Resolves once the worker loop has fully unwound. */
+  done: Promise<void>;
+  finish: () => void;
 }
+
+const SAVE_DEBOUNCE_MS = 300;
+const CLOSE_WAIT_MS = 5_000;
 
 function label(w: WorkerPick): string {
   return `${w.provider} (${w.model ?? 'default'})`;
@@ -55,6 +62,7 @@ function isClosed(tab: Tab): boolean {
 export class TaskEngine extends EventEmitter {
   private readonly tabs = new Map<string, Tab>();
   private readonly runs = new Map<string, ActiveRun>();
+  private readonly saveTimers = new Map<string, NodeJS.Timeout>();
   private readonly now: () => Date;
 
   constructor(private readonly deps: EngineDeps) {
@@ -220,20 +228,28 @@ export class TaskEngine extends EventEmitter {
 
   async close(tabId: string, opts: { deleteWorktree: boolean }): Promise<Tab> {
     const tab = this.must(tabId);
-    this.runs.get(tab.id)?.ac.abort();
+    const run = this.runs.get(tab.id);
+    run?.ac.abort();
     tab.status = transition(tab.status, 'close');
+    await this.touch(tab);
+    if (run) await Promise.race([run.done, new Promise<void>((r) => setTimeout(r, CLOSE_WAIT_MS))]);
+
     if (opts.deleteWorktree && tab.worktree) {
       const wt = this.deps.worktrees(tab.projectRoot);
-      let keepBranch = true;
       try {
-        keepBranch = await wt.hasUnmergedCommits(tab.worktree.branch, await wt.defaultBranch());
-      } catch {
-        /* keep the branch when unsure */
+        let keepBranch = true;
+        try {
+          keepBranch = await wt.hasUnmergedCommits(tab.worktree.branch, await wt.defaultBranch());
+        } catch {
+          /* keep the branch when unsure */
+        }
+        await wt.remove(tab.worktree.path, { keepBranch, branch: tab.worktree.branch });
+        this.addItem(tab, 'system', `Worktree removed; branch ${tab.worktree.branch} ${keepBranch ? 'kept (has unmerged commits)' : 'deleted'}.`);
+      } catch (err) {
+        this.addItem(tab, 'error', `Could not remove the worktree at ${tab.worktree.path}: ${(err as Error).message}`);
       }
-      await wt.remove(tab.worktree.path, { keepBranch, branch: tab.worktree.branch });
-      this.addItem(tab, 'system', `Worktree removed; branch ${tab.worktree.branch} ${keepBranch ? 'kept (has unmerged commits)' : 'deleted'}.`);
+      await this.touch(tab);
     }
-    await this.touch(tab);
     return tab;
   }
 
@@ -293,10 +309,29 @@ export class TaskEngine extends EventEmitter {
     return item;
   }
 
+  /** Persists and announces the whole tab. Used for status and metadata changes, not for every streamed chunk. */
   private async touch(tab: Tab): Promise<void> {
+    const pending = this.saveTimers.get(tab.id);
+    if (pending) {
+      clearTimeout(pending);
+      this.saveTimers.delete(tab.id);
+    }
     tab.updatedAt = this.now().toISOString();
     await this.deps.store.save(tab);
     this.emit('tab', structuredClone(tab));
+  }
+
+  /** Debounced save while a worker streams; the stream itself reaches clients as `item` events. */
+  private persistSoon(tab: Tab): void {
+    if (this.saveTimers.has(tab.id)) return;
+    this.saveTimers.set(
+      tab.id,
+      setTimeout(() => {
+        this.saveTimers.delete(tab.id);
+        tab.updatedAt = this.now().toISOString();
+        this.deps.store.save(tab).catch((err: unknown) => this.emit('engine-error', { tabId: tab.id, error: err }));
+      }, SAVE_DEBOUNCE_MS),
+    );
   }
 
   private async record(tab: Tab, provider: Provider, model: string | null, purpose: 'vote' | 'work' | 'summarize', ev: ResultEvent): Promise<number> {
@@ -357,7 +392,11 @@ export class TaskEngine extends EventEmitter {
     const s = this.settingsFor(tab);
     const worker = tab.worker;
     if (!worker) throw new Error('no worker assigned');
-    const run: ActiveRun = { ac: new AbortController() };
+    let finish: () => void = () => {};
+    const done = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const run: ActiveRun = { ac: new AbortController(), done, finish };
     this.runs.set(tab.id, run);
     const stallMs = Math.max(10, s.stallMinutes * 60_000);
     const armStall = () => {
@@ -392,41 +431,48 @@ export class TaskEngine extends EventEmitter {
         switch (ev.type) {
           case 'session':
             worker.sessionId = ev.id;
+            await this.touch(tab);
             break;
           case 'text':
             this.addItem(tab, 'assistant', ev.text);
+            this.persistSoon(tab);
             break;
           case 'tool':
-            this.addItem(tab, 'tool', undefined, undefined, { id: ev.id, name: ev.name, input: ev.input });
+            this.addItem(tab, 'tool', undefined, undefined, { id: ev.id, name: ev.name, input: clipValue(ev.input) });
+            this.persistSoon(tab);
             break;
           case 'tool_result': {
+            const output = clipText(ev.output);
             const call = ev.id ? [...tab.transcript].reverse().find((i) => i.kind === 'tool' && i.tool?.id === ev.id) : undefined;
             if (call?.tool) {
-              call.tool.output = ev.output;
+              call.tool.output = output;
               call.tool.isError = ev.isError;
               this.emit('item', { tabId: tab.id, item: call });
             } else {
-              this.addItem(tab, 'tool', undefined, undefined, { name: 'result', input: null, output: ev.output, isError: ev.isError });
+              this.addItem(tab, 'tool', undefined, undefined, { name: 'result', input: null, output, isError: ev.isError });
             }
+            this.persistSoon(tab);
             break;
           }
           case 'error':
             this.addItem(tab, 'error', ev.message);
+            this.persistSoon(tab);
             break;
           case 'result': {
             result = ev;
             const costUsd = await this.record(tab, worker.provider, worker.model, 'work', ev);
             this.addItem(tab, 'result', ev.text, { usage: ev.usage, costUsd, exitCode: ev.exitCode, isError: ev.isError });
+            await this.touch(tab);
             break;
           }
         }
-        await this.touch(tab);
       }
     } catch (err) {
       threw = err instanceof Error ? err.message : String(err);
     } finally {
       if (run.stallTimer) clearTimeout(run.stallTimer);
       this.runs.delete(tab.id);
+      run.finish();
     }
 
     if (isClosed(tab)) return;

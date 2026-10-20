@@ -5,6 +5,7 @@ import type { WebSocketServer } from 'ws';
 import { PROVIDERS, type CliHealth, type Provider } from './adapters/types.js';
 import type { SettingsStore } from './config/settings.js';
 import type { PricingStore, PriceTable } from './ledger/pricing.js';
+import { isAllowedOrigin } from './origin.js';
 import type { SubmitMode, TaskEngine } from './tasks/engine.js';
 import { runGit } from './worktrees/git.js';
 import { WorktreeManager, type WorktreeOps } from './worktrees/manager.js';
@@ -49,6 +50,8 @@ async function readJson(req: http.IncomingMessage): Promise<Json> {
   }
   const text = Buffer.concat(chunks).toString('utf8').trim();
   if (text === '') return {};
+  const contentType = String(req.headers['content-type'] ?? '').toLowerCase();
+  if (!contentType.includes('application/json')) throw new HttpError(415, 'request bodies must be sent as application/json');
   try {
     const parsed: unknown = JSON.parse(text);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('body must be a JSON object');
@@ -229,6 +232,11 @@ export function createServer(deps: ServerDeps): CouncilServer {
     const url = new URL(req.url ?? '/', 'http://localhost');
     const method = req.method ?? 'GET';
     if (url.pathname.startsWith('/api/')) {
+      if (method !== 'GET' && method !== 'HEAD' && !isAllowedOrigin(req.headers.origin)) {
+        res.writeHead(403, { 'content-type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ error: 'cross-origin requests are not allowed' }));
+        return;
+      }
       api(method, url, req)
         .then(({ status, body }) => {
           res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });

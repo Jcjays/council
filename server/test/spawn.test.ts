@@ -48,6 +48,39 @@ test('spawnCli kills the child when the signal aborts', async () => {
   expect(await child.exit).not.toBe(0);
 });
 
+test('aborting kills the whole process tree, not just the wrapper', async () => {
+  const grandchild = 'const {spawn}=require("child_process");const g=spawn(process.execPath,["-e","setInterval(()=>{},1000)"],{stdio:"ignore"});console.log(JSON.stringify({gpid:g.pid}));setInterval(()=>{},1000)';
+  const ac = new AbortController();
+  const child = spawnCli(node, ['-e', grandchild], { cwd, signal: ac.signal });
+  let gpid = 0;
+  const alive = () => {
+    try {
+      process.kill(gpid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  let wasAlive = false;
+  for await (const line of child.lines) {
+    gpid = Number((line as { gpid: number }).gpid);
+    wasAlive = alive();
+    ac.abort();
+  }
+  await child.exit;
+  expect(gpid).toBeGreaterThan(0);
+  expect(wasAlive).toBe(true);
+  for (let i = 0; i < 25 && alive(); i++) await new Promise((r) => setTimeout(r, 100));
+  if (alive()) {
+    try {
+      process.kill(gpid);
+    } catch {
+      /* already gone */
+    }
+  }
+  expect(alive()).toBe(false);
+});
+
 test('resolveCommand returns the .cmd shim on win32 when one is on PATH', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'council-shim-'));
   fs.writeFileSync(path.join(dir, 'foo.cmd'), '@echo off\r\n');

@@ -299,6 +299,65 @@ test('an unavailable provider is routed around', async () => {
   expect(voted.routing).toMatchObject({ shiftedFrom: 'easy', reason: expect.stringContaining('gemini') });
 });
 
+test('a worker that exits 0 but reports failure in-band still fails the tab and is ledgered', async () => {
+  const text = JSON.stringify({ tier: 'easy', confidence: 0.9, reason: 'r' });
+  const inBand = new FakeAdapter('gemini', (opts: RunOptions) =>
+    opts.purpose === 'vote'
+      ? { events: voteEvents('easy') }
+      : {
+          events: [
+            { type: 'session', id: 's' },
+            { type: 'result', usage: { inputTokens: 5, cachedInputTokens: 0, outputTokens: 1 }, costUsd: 0.002, exitCode: 0, isError: true, text: 'quota exceeded' },
+          ],
+        },
+  );
+  void text;
+  const { engine, ledgerFile } = setup({ settings: { autoStart: true, autoEscalate: false }, adapters: { gemini: inBand } });
+  const tab = await engine.createTab('C:/proj', 't');
+  await engine.submit(tab.id, 'x', { kind: 'auto' });
+  const failed = await waitFor(engine, tab.id, ['failed']);
+  expect(failed.status).toBe('failed');
+  const work = (await readEntries(ledgerFile)).filter((e) => e.purpose === 'work');
+  expect(work).toHaveLength(1);
+  expect(work[0]?.costUsd).toBe(0.002);
+});
+
+test('streaming many events emits few full-tab updates and clips oversized tool output', async () => {
+  const events: AdapterEvent[] = [{ type: 'session', id: 's' }];
+  for (let i = 0; i < 40; i++) events.push({ type: 'text', text: `chunk ${i}` });
+  events.push({ type: 'tool', id: 't1', name: 'Read', input: { file_path: 'big.txt' } });
+  events.push({ type: 'tool_result', id: 't1', output: 'x'.repeat(100_000) });
+  events.push({ type: 'result', usage: { inputTokens: 1, cachedInputTokens: 0, outputTokens: 1 }, costUsd: 0.001, exitCode: 0, isError: false, text: 'done' });
+  const chatty = new FakeAdapter('gemini', (opts: RunOptions) => (opts.purpose === 'vote' ? { events: voteEvents('easy') } : { events }));
+  const { engine } = setup({ settings: { autoStart: true }, adapters: { gemini: chatty } });
+  let tabEmits = 0;
+  let itemEmits = 0;
+  engine.on('tab', () => tabEmits++);
+  engine.on('item', () => itemEmits++);
+  const tab = await engine.createTab('C:/proj', 't');
+  await engine.submit(tab.id, 'x', { kind: 'auto' });
+  const idle = await waitFor(engine, tab.id, ['idle']);
+  expect(itemEmits).toBeGreaterThanOrEqual(43);
+  expect(tabEmits).toBeLessThan(12);
+  const toolItem = idle.transcript.find((i) => i.kind === 'tool');
+  expect((toolItem?.tool?.output ?? '').length).toBeLessThan(25_000);
+  expect(idle.transcript.filter((i) => i.kind === 'assistant')).toHaveLength(40);
+});
+
+test('close persists the closed state even when worktree removal fails', async () => {
+  const { engine, worktrees } = setup({ settings: { autoStart: true } });
+  worktrees.remove = async () => {
+    throw new Error('EBUSY: resource busy');
+  };
+  const tab = await engine.createTab('C:/proj', 't');
+  await engine.submit(tab.id, 'x', { kind: 'auto' });
+  await waitFor(engine, tab.id, ['idle']);
+  const closed = await engine.close(tab.id, { deleteWorktree: true });
+  expect(closed.status).toBe('closed');
+  expect(closed.transcript.some((i) => i.kind === 'error' && /EBUSY/.test(i.text ?? ''))).toBe(true);
+  expect(engine.getTab(tab.id)?.status).toBe('closed');
+});
+
 test('budgets reflect the ledger against the configured limits', async () => {
   const { engine } = setup({ settings: { autoStart: true, budgets: { claude: 40, codex: 30, gemini: 0.01 } } });
   const tab = await engine.createTab('C:/proj', 't');

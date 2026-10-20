@@ -50,6 +50,13 @@ test('runCliJson parses one pretty-printed JSON object from stdout', async () =>
   ]);
 });
 
+test('runCliJson tolerates noise lines before and after the JSON object', async () => {
+  const script = 'console.log("Loaded cached credentials.");console.log(JSON.stringify({response:"pong",stats:{}},null,2));console.log("Deprecation: -p is deprecated")';
+  const events = await collect(runCliJson({ cmd: node, args: ['-e', script] }, { cwd }, (o) => [{ type: 'text', text: String(o.response) }]));
+  expect(events[0]).toEqual({ type: 'text', text: 'pong' });
+  expect(events.at(-1)).toMatchObject({ type: 'result', isError: false });
+});
+
 test('runCliJson synthesizes an error result when stdout is not JSON', async () => {
   const script = 'console.log("not json");console.error("bad key");process.exit(1)';
   const events = await collect(runCliJson({ cmd: node, args: ['-e', script] }, { cwd }, () => []));

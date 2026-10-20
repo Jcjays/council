@@ -45,6 +45,25 @@ export async function* runCli(
   }
 }
 
+/** JSON.parse that survives notice lines printed before or after the object. */
+export function parseLooseJson(raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    /* fall through to the outermost braces */
+  }
+  const start = raw.indexOf('{');
+  const end = raw.lastIndexOf('}');
+  if (start >= 0 && end > start) {
+    try {
+      return JSON.parse(raw.slice(start, end + 1));
+    } catch {
+      /* not JSON */
+    }
+  }
+  return undefined;
+}
+
 function synthesizedResult(exitCode: number, isError: boolean, detail: string): ResultEvent {
   const text = detail.trim();
   return { type: 'result', usage: ZERO_USAGE, exitCode, isError, text: text === '' ? undefined : text };
@@ -73,13 +92,7 @@ export async function* runCliJson(
   }
   const exitCode = await child.exit;
   const raw = child.stdout().trim();
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    parsed = undefined;
-  }
+  const parsed = parseLooseJson(raw);
 
   if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
     let sawResult = false;

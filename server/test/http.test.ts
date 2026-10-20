@@ -152,6 +152,30 @@ test('errors are JSON: 404 for unknown routes, 400 for bad bodies and wrong-stat
   expect((await api('GET', '/api/tabs/does-not-exist')).status).toBe(404);
 });
 
+test('cross-origin requests cannot drive the API or the websocket', async () => {
+  const evil = await fetch(`${base}/api/tabs`, {
+    method: 'POST',
+    headers: { 'content-type': 'text/plain', origin: 'http://evil.example' },
+    body: JSON.stringify({ projectRoot: 'C:/proj', title: 'pwned' }),
+  });
+  expect(evil.status).toBe(403);
+  const sameOriginOtherPort = await fetch(`${base}/api/budgets`, { headers: { origin: 'http://localhost:5173' } });
+  expect(sameOriginOtherPort.status).toBe(200);
+  const noJson = await fetch(`${base}/api/tabs`, { method: 'POST', headers: { 'content-type': 'text/plain' }, body: '{"projectRoot":"C:/proj"}' });
+  expect(noJson.status).toBe(415);
+
+  const rejected = await new Promise<boolean>((resolve) => {
+    const ws = new WebSocket(`${base.replace('http', 'ws')}/ws`, { headers: { origin: 'http://evil.example' } });
+    ws.on('open', () => {
+      ws.close();
+      resolve(false);
+    });
+    ws.on('unexpected-response', () => resolve(true));
+    ws.on('error', () => resolve(true));
+  });
+  expect(rejected).toBe(true);
+});
+
 test('serves the built client with an SPA fallback', async () => {
   const index = await fetch(`${base}/`);
   expect(index.status).toBe(200);

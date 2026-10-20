@@ -1,5 +1,6 @@
 import type http from 'node:http';
 import { WebSocket, WebSocketServer } from 'ws';
+import { isAllowedOrigin } from './origin.js';
 import type { TaskEngine } from './tasks/engine.js';
 
 export type WsMessage =
@@ -14,7 +15,12 @@ export type WsMessage =
  * with all tabs and budgets; anything that happens meanwhile is queued behind it.
  */
 export function attachWebSocket(server: http.Server, engine: TaskEngine): WebSocketServer {
-  const wss = new WebSocketServer({ server, path: '/ws' });
+  // WebSockets ignore the same-origin policy; refuse upgrades from non-loopback pages.
+  const wss = new WebSocketServer({
+    server,
+    path: '/ws',
+    verifyClient: (info: { origin: string | undefined }) => isAllowedOrigin(info.origin || undefined),
+  });
   const pending = new Map<WebSocket, string[]>();
 
   const deliver = (socket: WebSocket, data: string) => {
