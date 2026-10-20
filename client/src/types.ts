@@ -74,6 +74,8 @@ export interface Tab {
   escalations: number;
   stalled: boolean;
   lastMerge: MergeResult | null;
+  /** Marked ready after a blocked merge: the branch is the developer's to merge. Absent on servers without the feature. */
+  ready?: boolean;
   createdAt: string;
   updatedAt: string;
 }

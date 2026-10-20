@@ -1,7 +1,9 @@
-import { useState } from 'react';
-import { formatUsd, statusLabel, workerLabel } from '../lib/format';
+import { laneCounts } from '../lib/lanes';
 import type { BudgetState, ProjectInfo, Provider, Tab } from '../types';
 import { BudgetBars } from './BudgetBars';
+import { ProjectPicker } from './ProjectPicker';
+import { TabList } from './TabList';
+import { ThemeToggle } from './ThemeToggle';
 
 interface Props {
   projects: ProjectInfo[];
@@ -15,100 +17,48 @@ interface Props {
   resetDay: number;
   view: 'tabs' | 'settings';
   onView: (v: 'tabs' | 'settings') => void;
+  onHelp: () => void;
   connected: boolean;
+  now: Date;
 }
 
 export function Sidebar(p: Props) {
-  const [path, setPath] = useState('');
-  const [showClosed, setShowClosed] = useState(false);
-  const [opening, setOpening] = useState(false);
-  const visible = p.tabs.filter((t) => showClosed || t.status !== 'closed');
-
-  const open = async (target: string) => {
-    if (!target.trim()) return;
-    setOpening(true);
-    try {
-      await p.onOpenProject(target.trim());
-      setPath('');
-    } finally {
-      setOpening(false);
-    }
-  };
-
+  const counts = laneCounts(p.tabs);
   return (
     <aside className="sidebar">
       <div className="brand">
         <h1>Council</h1>
-        <span className={`dot ${p.connected ? 'dot-on' : 'dot-off'}`} title={p.connected ? 'connected' : 'reconnecting…'} />
+        <span className={`conn${p.connected ? '' : ' off'}`} title={p.connected ? 'Connected to the local server' : 'Reconnecting…'} role="status" aria-label={p.connected ? 'connected' : 'reconnecting'} />
+        <span className="spacer" />
+        <ThemeToggle />
+        <button className={`iconbtn${p.view === 'settings' ? ' selected' : ''}`} onClick={() => p.onView(p.view === 'settings' ? 'tabs' : 'settings')} title="Settings (Alt+S)" aria-label="Settings" aria-pressed={p.view === 'settings'}>
+          ⚙
+        </button>
       </div>
 
-      <section>
-        <header className="section-title">Project</header>
-        <form
-          className="row"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void open(path);
-          }}
-        >
-          <input value={path} onChange={(e) => setPath(e.target.value)} placeholder="C:\path\to\checkout" aria-label="Project path" />
-          <button type="submit" disabled={opening}>
-            Open
-          </button>
-        </form>
-        {p.projects.length > 0 && (
-          <select value={p.project?.root ?? ''} onChange={(e) => void open(e.target.value)} aria-label="Recent projects">
-            <option value="">Recent projects…</option>
-            {p.projects.map((pr) => (
-              <option key={pr.projectId} value={pr.root}>
-                {pr.root}
-              </option>
-            ))}
-          </select>
-        )}
-        {p.project && (
-          <div className="muted small" title={p.project.root}>
-            {p.project.root}
-            {p.project.defaultBranch ? ` · ${p.project.defaultBranch}` : ''}
-          </div>
-        )}
-      </section>
+      <ProjectPicker projects={p.projects} project={p.project} onOpenProject={p.onOpenProject} />
+
+      <div className="newtab">
+        <button onClick={p.onNewTab} disabled={!p.project} title={p.project ? 'Create a tab and describe a task' : 'Open a project first'}>
+          <span>+ New tab</span>
+          <kbd>Alt N</kbd>
+        </button>
+      </div>
+
+      <TabList tabs={p.tabs} selectedId={p.selectedId} onSelect={p.onSelect} now={p.now} emptyText={p.project ? 'No tabs yet. Create one and describe a task.' : 'Open a project to start.'} />
 
       <BudgetBars budgets={p.budgets} resetDay={p.resetDay} />
 
-      <section className="tabs-list">
-        <header className="section-title">
-          <span>Tabs</span>
-          <button className="link" onClick={p.onNewTab} disabled={!p.project}>
-            + New tab
-          </button>
-        </header>
-        {visible.length === 0 && <div className="muted small">{p.project ? 'No tabs yet. Create one and describe a task.' : 'Open a project to start.'}</div>}
-        <ul>
-          {visible.map((t) => (
-            <li key={t.id}>
-              <button className={`tab-item ${t.id === p.selectedId ? 'selected' : ''}`} onClick={() => p.onSelect(t.id)}>
-                <span className={`status status-${t.status}`} title={statusLabel(t.status)} />
-                <span className="tab-title">{t.title || 'Untitled task'}</span>
-                <span className="muted small">{t.worker ? workerLabel(t.worker) : statusLabel(t.status)}</span>
-                <span className="muted small">{formatUsd(t.costUsd)}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
-        <label className="small muted">
-          <input type="checkbox" checked={showClosed} onChange={(e) => setShowClosed(e.target.checked)} /> show closed
-        </label>
-      </section>
-
-      <nav className="sidebar-nav">
-        <button className={p.view === 'tabs' ? 'selected' : ''} onClick={() => p.onView('tabs')}>
-          Tabs
+      <div className="foot">
+        <span>
+          {counts.working} working
+        </span>
+        <span>{counts.needsYou} need{counts.needsYou === 1 ? 's' : ''} you</span>
+        <span className="spacer" />
+        <button className="link" onClick={p.onHelp} title="Keyboard shortcuts (Alt+/)">
+          Alt+/ shortcuts
         </button>
-        <button className={p.view === 'settings' ? 'selected' : ''} onClick={() => p.onView('settings')}>
-          Settings
-        </button>
-      </nav>
+      </div>
     </aside>
   );
 }

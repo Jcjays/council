@@ -1,10 +1,26 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from './api';
+import { Home } from './components/Home';
 import { Settings } from './components/Settings';
+import { ShortcutHelp } from './components/ShortcutHelp';
 import { Sidebar } from './components/Sidebar';
 import { TabView } from './components/TabView';
+import { useNow } from './hooks/useNow';
+import { laneOf, stepThrough, visibleOrder } from './lib/lanes';
+import { shortcutAction } from './lib/shortcuts';
 import type { BudgetState, CliHealth, ProjectInfo, Provider, Settings as SettingsT, Tab, TranscriptItem } from './types';
 import { useSocket } from './useSocket';
+
+const DETAILS_KEY = 'council.details';
+
+function readDetailsPref(): boolean {
+  try {
+    const v = localStorage.getItem(DETAILS_KEY);
+    return v === null ? window.innerWidth >= 1200 : v === '1';
+  } catch {
+    return true;
+  }
+}
 
 export function App() {
   const [tabs, setTabs] = useState<Record<string, Tab>>({});
@@ -16,6 +32,11 @@ export function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [view, setView] = useState<'tabs' | 'settings'>('tabs');
   const [error, setError] = useState<string | null>(null);
+  const [help, setHelp] = useState(false);
+  const [details, setDetails] = useState(readDetailsPref);
+  /** Stall notices received per tab, so "Keep waiting" can tell a new stall from the one it answered. */
+  const [stallSeq, setStallSeq] = useState<Record<string, number>>({});
+  const now = useNow(10_000);
 
   const onError = useCallback((message: string) => setError(message), []);
 
@@ -33,6 +54,7 @@ export function App() {
         const transcript = idx >= 0 ? tab.transcript.map((i, j) => (j === idx ? item : i)) : [...tab.transcript, item];
         return { ...prev, [tabId]: { ...tab, transcript } };
       }),
+    onStall: (tabId: string) => setStallSeq((prev) => ({ ...prev, [tabId]: (prev[tabId] ?? 0) + 1 })),
     onBudgets: setBudgets,
   });
 
@@ -42,6 +64,7 @@ export function App() {
     setTabs((prev) => ({ ...prev, ...Object.fromEntries(info.tabs.map((t) => [t.id, t])) }));
     setProjects(await api.projects());
     setSelectedId(null);
+    setView('tabs');
   }, []);
 
   useEffect(() => {
@@ -57,26 +80,85 @@ export function App() {
       .catch((e: Error) => onError(e.message));
   }, [onError, openProject]);
 
-  const projectTabs = useMemo(
-    () =>
-      Object.values(tabs)
-        .filter((t) => project && t.projectId === project.projectId)
-        .sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
-    [tabs, project],
-  );
+  const projectTabs = useMemo(() => Object.values(tabs).filter((t) => project && t.projectId === project.projectId), [tabs, project]);
+  const openTabs = useMemo(() => projectTabs.filter((t) => t.status !== 'closed'), [projectTabs]);
   const selected = selectedId ? tabs[selectedId] : undefined;
 
-  const newTab = async () => {
+  const select = useCallback((id: string | null) => {
+    if (id) setSelectedId(id);
+    setView('tabs');
+  }, []);
+
+  const newTab = useCallback(async () => {
     if (!project) return;
     try {
       const tab = await api.createTab(project.root, '');
       setTabs((prev) => ({ ...prev, [tab.id]: tab }));
-      setSelectedId(tab.id);
-      setView('tabs');
+      select(tab.id);
     } catch (err) {
       onError((err as Error).message);
     }
-  };
+  }, [project, select, onError]);
+
+  const toggleDetails = useCallback(() => {
+    setDetails((d) => {
+      try {
+        localStorage.setItem(DETAILS_KEY, d ? '0' : '1');
+      } catch {
+        /* preference lives for this page only */
+      }
+      return !d;
+    });
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const action = shortcutAction(e);
+      if (!action) return;
+      if (action.type === 'escape') {
+        if (help) {
+          e.preventDefault();
+          setHelp(false);
+        }
+        return;
+      }
+      e.preventDefault();
+      const order = visibleOrder(projectTabs);
+      switch (action.type) {
+        case 'new-tab':
+          void newTab();
+          break;
+        case 'settings':
+          setView((v) => (v === 'settings' ? 'tabs' : 'settings'));
+          break;
+        case 'help':
+          setHelp((h) => !h);
+          break;
+        case 'toggle-details':
+          toggleDetails();
+          break;
+        case 'next-tab':
+          select(stepThrough(order, selectedId, 1));
+          break;
+        case 'prev-tab':
+          select(stepThrough(order, selectedId, -1));
+          break;
+        case 'next-attention':
+          select(stepThrough(order.filter((t) => laneOf(t) === 'needs-you'), selectedId, 1));
+          break;
+        case 'prev-attention':
+          select(stepThrough(order.filter((t) => laneOf(t) === 'needs-you'), selectedId, -1));
+          break;
+        case 'jump': {
+          const target = order[action.index];
+          if (target) select(target.id);
+          break;
+        }
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [help, projectTabs, selectedId, newTab, select, toggleDetails]);
 
   return (
     <div className="app">
@@ -92,22 +174,26 @@ export function App() {
         }}
         tabs={projectTabs}
         selectedId={selectedId}
-        onSelect={(id) => {
-          setSelectedId(id);
-          setView('tabs');
-        }}
+        onSelect={select}
         onNewTab={() => void newTab()}
         budgets={budgets}
         resetDay={settings?.resetDay ?? 1}
         view={view}
         onView={setView}
+        onHelp={() => setHelp(true)}
         connected={connected}
+        now={now}
       />
       <div className="content">
+        {!connected && (
+          <div className="banner tone-warn" role="status">
+            <span>Reconnecting to the local Council server… Nothing is lost; the page catches up when it is back.</span>
+          </div>
+        )}
         {error && (
-          <div className="banner" role="alert">
+          <div className="banner tone-danger" role="alert">
             <span>{error}</span>
-            <button className="link" onClick={() => setError(null)}>
+            <button className="link sm" onClick={() => setError(null)}>
               dismiss
             </button>
           </div>
@@ -117,13 +203,22 @@ export function App() {
         ) : selected && settings ? (
           <TabView tab={selected} settings={settings} project={project} onError={onError} />
         ) : (
-          <main className="empty">
-            <h2>Council</h2>
-            <p>Open a project on the left, create a tab, and describe a task. The council votes on how hard it is and hands it to the cheapest capable agent in its own git worktree.</p>
-            {!project && projects.length === 0 && <p className="muted">Paste the path of a git checkout to begin.</p>}
-          </main>
+          <Home
+            projects={projects}
+            project={project}
+            openTabs={openTabs.length}
+            onOpenProject={async (p) => {
+              try {
+                await openProject(p);
+              } catch (err) {
+                onError((err as Error).message);
+              }
+            }}
+            onNewTab={() => void newTab()}
+          />
         )}
       </div>
+      {help && <ShortcutHelp onClose={() => setHelp(false)} />}
     </div>
   );
 }

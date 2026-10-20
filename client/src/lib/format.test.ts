@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { budgetTone, daysLeft, formatUsd, statusLabel, workerLabel } from './format';
+import { basename, budgetTone, costSource, daysLeft, elapsed, formatTokens, formatUsd, relativeTime, statusLabel, workerLabel } from './format';
 
 test('formatUsd shows four decimals under a cent and two otherwise', () => {
   expect(formatUsd(0.0012)).toBe('$0.0012');
@@ -32,4 +32,42 @@ test('statusLabel is human readable', () => {
   expect(statusLabel('awaiting-start')).toBe('Ready to start');
   expect(statusLabel('handing-off')).toBe('Handing off');
   expect(statusLabel('running')).toBe('Working');
+});
+
+test('formatTokens scales to K and M', () => {
+  expect(formatTokens(480)).toBe('480');
+  expect(formatTokens(12_345)).toBe('12K');
+  expect(formatTokens(1_234)).toBe('1.2K');
+  expect(formatTokens(1_000)).toBe('1K');
+  expect(formatTokens(2_500_000)).toBe('2.5M');
+  expect(formatTokens(-5)).toBe('0');
+});
+
+test('relativeTime rounds to the nearest unit', () => {
+  const now = new Date('2026-10-21T12:00:00Z');
+  expect(relativeTime('2026-10-21T11:59:40Z', now)).toBe('now');
+  expect(relativeTime('2026-10-21T11:58:00Z', now)).toBe('2m ago');
+  expect(relativeTime('2026-10-21T09:00:00Z', now)).toBe('3h ago');
+  expect(relativeTime('2026-10-19T12:00:00Z', now)).toBe('2d ago');
+  expect(relativeTime('not a date', now)).toBe('');
+  expect(relativeTime('2026-09-01T12:00:00Z', now)).not.toContain('ago');
+});
+
+test('elapsed formats seconds, minutes and hours', () => {
+  expect(elapsed(12_000)).toBe('12s');
+  expect(elapsed(252_000)).toBe('4m 12s');
+  expect(elapsed(3_780_000)).toBe('1h 03m');
+  expect(elapsed(-1)).toBe('0s');
+});
+
+test('costSource tells reported from estimated costs apart', () => {
+  expect(costSource('claude')).toBe('reported by Claude Code');
+  expect(costSource('codex')).toBe('estimated from the price table');
+  expect(costSource(null)).toBe('estimated from the price table');
+});
+
+test('basename takes the last segment of either slash style', () => {
+  expect(basename('C:\\Users\\Chris\\Desktop\\council')).toBe('council');
+  expect(basename('/home/chris/council/')).toBe('council');
+  expect(basename('council')).toBe('council');
 });

@@ -37,5 +37,6 @@ export const api = {
   switchWorker: (id: string, provider: Provider, model: string | null) => call<Tab>('POST', `/api/tabs/${id}/switch`, { provider, model }),
   merge: (id: string) => call<{ tab: Tab; result: MergeResult }>('POST', `/api/tabs/${id}/merge`),
   rebase: (id: string) => call<Tab>('POST', `/api/tabs/${id}/rebase`),
+  markReady: (id: string) => call<Tab>('POST', `/api/tabs/${id}/ready`),
   close: (id: string, deleteWorktree: boolean) => call<Tab>('POST', `/api/tabs/${id}/close`, { deleteWorktree }),
 };
