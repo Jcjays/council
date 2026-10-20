@@ -1,0 +1,113 @@
+import type { JsonObject } from './jsonl.js';
+import { runCli } from './run.js';
+import { resolveCommand } from './spawn.js';
+import { num, VOTE_MAX_BUDGET_USD, type AdapterEvent, type CliSpec, type RunOptions } from './types.js';
+
+/**
+ * Claude Code in print mode. Work runs edit freely but shell commands are limited
+ * to the allow-list unless fullAuto; votes and summaries run tool-less and capped.
+ */
+export function buildClaudeArgs(o: RunOptions): CliSpec {
+  const args = ['-p', '--output-format', 'stream-json', '--verbose'];
+  if (o.model) args.push('--model', o.model);
+
+  if (o.purpose === 'work') {
+    if (o.resumeId) args.push('--resume', o.resumeId);
+    if (o.fullAuto) {
+      args.push('--dangerously-skip-permissions');
+    } else {
+      args.push('--permission-mode', 'acceptEdits');
+      if (o.allowedCommands.length > 0) args.push('--allowedTools', ...o.allowedCommands);
+    }
+  } else {
+    args.push('--tools', '', '--no-session-persistence', '--max-budget-usd', String(VOTE_MAX_BUDGET_USD));
+    if (o.jsonSchema) args.push('--json-schema', JSON.stringify(o.jsonSchema));
+  }
+
+  return { cmd: resolveCommand('claude'), args, stdin: o.prompt };
+}
+
+function blocksToText(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content
+    .map((b) => (b && typeof b === 'object' && 'text' in b && typeof b.text === 'string' ? b.text : ''))
+    .join('');
+}
+
+function contentBlocks(o: JsonObject): JsonObject[] {
+  const message = o.message;
+  if (!message || typeof message !== 'object') return [];
+  const content = (message as JsonObject).content;
+  return Array.isArray(content) ? (content.filter((b) => b && typeof b === 'object') as JsonObject[]) : [];
+}
+
+export function parseClaudeLine(o: JsonObject): AdapterEvent[] {
+  switch (o.type) {
+    case 'system':
+      return o.subtype === 'init' && typeof o.session_id === 'string' ? [{ type: 'session', id: o.session_id }] : [];
+
+    case 'assistant': {
+      const out: AdapterEvent[] = [];
+      for (const block of contentBlocks(o)) {
+        if (block.type === 'text' && typeof block.text === 'string' && block.text !== '') {
+          out.push({ type: 'text', text: block.text });
+        } else if (block.type === 'tool_use' && typeof block.name === 'string') {
+          out.push({
+            type: 'tool',
+            id: typeof block.id === 'string' ? block.id : undefined,
+            name: block.name,
+            input: block.input,
+          });
+        }
+      }
+      return out;
+    }
+
+    case 'user': {
+      const out: AdapterEvent[] = [];
+      for (const block of contentBlocks(o)) {
+        if (block.type === 'tool_result') {
+          out.push({
+            type: 'tool_result',
+            id: typeof block.tool_use_id === 'string' ? block.tool_use_id : undefined,
+            output: blocksToText(block.content),
+            isError: block.is_error === true,
+          });
+        }
+      }
+      return out;
+    }
+
+    case 'result': {
+      const usage = (o.usage && typeof o.usage === 'object' ? o.usage : {}) as JsonObject;
+      const text =
+        o.structured_output !== undefined
+          ? JSON.stringify(o.structured_output)
+          : typeof o.result === 'string'
+            ? o.result
+            : undefined;
+      return [
+        {
+          type: 'result',
+          usage: {
+            inputTokens: num(usage.input_tokens),
+            cachedInputTokens: num(usage.cache_read_input_tokens) + num(usage.cache_creation_input_tokens),
+            outputTokens: num(usage.output_tokens),
+          },
+          costUsd: typeof o.total_cost_usd === 'number' ? o.total_cost_usd : undefined,
+          exitCode: 0,
+          isError: o.is_error === true,
+          text,
+        },
+      ];
+    }
+
+    default:
+      return [];
+  }
+}
+
+export function runClaude(opts: RunOptions): AsyncIterable<AdapterEvent> {
+  return runCli(buildClaudeArgs(opts), { cwd: opts.cwd, env: opts.env, signal: opts.signal }, parseClaudeLine);
+}
