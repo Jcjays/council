@@ -1,0 +1,6 @@
+{"type":"init","timestamp":"2026-10-21T00:00:00.000Z","session_id":"2f6d1b1e-7c1a-4b4e-9d1e-gemini000001","model":"gemini-2.5-flash"}
+{"type":"message","timestamp":"2026-10-21T00:00:00.100Z","role":"user","content":"Create a file named hello.txt containing hi"}
+{"type":"tool_use","timestamp":"2026-10-21T00:00:01.000Z","tool_name":"write_file","tool_id":"write_file-1761004801000","parameters":{"file_path":"hello.txt","content":"hi"}}
+{"type":"tool_result","timestamp":"2026-10-21T00:00:01.200Z","tool_id":"write_file-1761004801000","status":"success","output":"Successfully created and wrote to new file: hello.txt."}
+{"type":"message","timestamp":"2026-10-21T00:00:02.000Z","role":"assistant","content":"I created hello.txt containing hi.","delta":true}
+{"type":"result","timestamp":"2026-10-21T00:00:02.100Z","status":"success","stats":{"models":{"gemini-2.5-flash":{"api":{"totalRequests":2,"totalErrors":0,"totalLatencyMs":1900},"tokens":{"prompt":9876,"candidates":40,"total":9950,"cached":5000,"thoughts":34,"tool":0}}},"tools":{"totalCalls":1,"totalSuccess":1,"totalFail":0,"totalDurationMs":200,"totalDecisions":{"accept":0,"reject":0,"modify":0,"auto_accept":1},"byName":{"write_file":{"count":1,"success":1,"fail":0,"durationMs":200,"decisions":{"accept":0,"reject":0,"modify":0,"auto_accept":1}}}},"files":{"totalLinesAdded":1,"totalLinesRemoved":0}}}

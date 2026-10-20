@@ -1,0 +1,86 @@
+import { expect, test } from 'vitest';
+import { buildCodexArgs, createCodexParser } from '../src/adapters/codex.js';
+import type { JsonObject } from '../src/adapters/jsonl.js';
+
+const parseCodexLine = (o: JsonObject) => createCodexParser()(o);
+import type { AdapterEvent, RunOptions } from '../src/adapters/types.js';
+import { fixtureLines } from './helpers/fixtures.js';
+
+const base: RunOptions = {
+  cwd: 'C:/w',
+  prompt: 'do it',
+  model: 'gpt-x',
+  purpose: 'work',
+  fullAuto: false,
+  allowedCommands: [],
+};
+
+test('work args: exec with json, cwd, workspace-write sandbox, model, prompt on stdin', () => {
+  const s = buildCodexArgs(base);
+  expect(s.cmd).toMatch(/codex/);
+  expect(s.args).toEqual(['exec', '--json', '-C', 'C:/w', '--skip-git-repo-check', '--sandbox', 'workspace-write', '-m', 'gpt-x', '-']);
+  expect(s.stdin).toBe('do it');
+});
+
+test('fullAuto bypasses approvals and sandbox', () => {
+  const s = buildCodexArgs({ ...base, fullAuto: true });
+  expect(s.args).toContain('--dangerously-bypass-approvals-and-sandbox');
+  expect(s.args).not.toContain('--sandbox');
+});
+
+test('resume targets the thread id and still reads the prompt from stdin', () => {
+  const s = buildCodexArgs({ ...base, resumeId: 'thread-1' });
+  expect(s.args.slice(-3)).toEqual(['resume', 'thread-1', '-']);
+  expect(s.args).toContain('--json');
+});
+
+test('vote args use a read-only sandbox and the output schema file', () => {
+  const s = buildCodexArgs({ ...base, purpose: 'vote', resumeId: 'ignored' }, 'C:/tmp/schema.json');
+  expect(s.args).toEqual(expect.arrayContaining(['--sandbox', 'read-only', '--output-schema', 'C:/tmp/schema.json']));
+  expect(s.args).not.toContain('resume');
+});
+
+test('null model omits -m', () => {
+  expect(buildCodexArgs({ ...base, model: null }).args).not.toContain('-m');
+});
+
+test('parses the documented work stream into session, tool, tool_result, text and result', () => {
+  const parse = createCodexParser();
+  const events = fixtureLines('codex-work.jsonl').flatMap((l) => parse(l));
+  expect(events[0]).toEqual({ type: 'session', id: '0199a213-81c0-7800-8f1d-codex0000001' });
+  const tools = events.filter((e) => e.type === 'tool') as Extract<AdapterEvent, { type: 'tool' }>[];
+  expect(tools.map((t) => t.name)).toEqual(['command_execution', 'file_change']);
+  expect(tools[0]).toMatchObject({ id: 'item_1', input: { command: "/bin/bash -lc 'printf hi > hello.txt'" } });
+  expect(events.find((e) => e.type === 'tool_result')).toEqual({ type: 'tool_result', id: 'item_1', output: '', isError: false });
+  expect(events.filter((e) => e.type === 'text')).toEqual([{ type: 'text', text: 'Created hello.txt containing hi.' }]);
+  expect(events.at(-1)).toEqual({
+    type: 'result',
+    usage: { inputTokens: 24763 - 24448, cachedInputTokens: 24448, outputTokens: 122 + 40 },
+    costUsd: undefined,
+    exitCode: 0,
+    isError: false,
+    text: 'Created hello.txt containing hi.',
+  });
+});
+
+test('reasoning items and item.started events produce nothing', () => {
+  expect(parseCodexLine({ type: 'item.completed', item: { id: 'r', type: 'reasoning', text: 'hmm' } })).toEqual([]);
+  expect(parseCodexLine({ type: 'item.started', item: { id: 'c', type: 'command_execution', command: 'ls' } })).toEqual([]);
+});
+
+test('a failed command execution is an error tool_result', () => {
+  const events = parseCodexLine({
+    type: 'item.completed',
+    item: { id: 'c1', type: 'command_execution', command: 'npm test', aggregated_output: 'FAIL', exit_code: 1, status: 'failed' },
+  });
+  expect(events[1]).toEqual({ type: 'tool_result', id: 'c1', output: 'FAIL', isError: true });
+});
+
+test('turn.failed is an error result carrying the message', () => {
+  const [r] = parseCodexLine({ type: 'turn.failed', error: { message: 'rate limited' } });
+  expect(r).toMatchObject({ type: 'result', isError: true, text: 'rate limited', usage: { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 } });
+});
+
+test('top-level error events map to error', () => {
+  expect(parseCodexLine({ type: 'error', message: 'boom' })).toEqual([{ type: 'error', message: 'boom' }]);
+});

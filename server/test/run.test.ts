@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 import type { JsonObject } from '../src/adapters/jsonl.js';
-import { runCli } from '../src/adapters/run.js';
+import { runCli, runCliJson } from '../src/adapters/run.js';
 import { ZERO_USAGE, type AdapterEvent } from '../src/adapters/types.js';
 import { collect } from './helpers/fixtures.js';
 
@@ -34,6 +34,28 @@ test('runCli passes stdin from the spec to the child', async () => {
   const script = 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{console.log(JSON.stringify({type:"text",text:s}));console.log(JSON.stringify({type:"result"}))})';
   const events = await collect(runCli({ cmd: node, args: ['-e', script], stdin: 'the prompt' }, { cwd }, parse));
   expect(events[0]).toEqual({ type: 'text', text: 'the prompt' });
+});
+
+test('runCliJson parses one pretty-printed JSON object from stdout', async () => {
+  const script = 'console.log(JSON.stringify({response:"pong",stats:{}},null,2))';
+  const events = await collect(
+    runCliJson({ cmd: node, args: ['-e', script] }, { cwd }, (o) => [
+      { type: 'text', text: String(o.response) },
+      { type: 'result', usage: ZERO_USAGE, exitCode: 0, isError: false, text: String(o.response) },
+    ]),
+  );
+  expect(events).toEqual([
+    { type: 'text', text: 'pong' },
+    { type: 'result', usage: ZERO_USAGE, exitCode: 0, isError: false, text: 'pong' },
+  ]);
+});
+
+test('runCliJson synthesizes an error result when stdout is not JSON', async () => {
+  const script = 'console.log("not json");console.error("bad key");process.exit(1)';
+  const events = await collect(runCliJson({ cmd: node, args: ['-e', script] }, { cwd }, () => []));
+  expect(events).toHaveLength(1);
+  expect(events[0]).toMatchObject({ type: 'result', exitCode: 1, isError: true });
+  expect((events[0] as Extract<AdapterEvent, { type: 'result' }>).text).toContain('bad key');
 });
 
 test('runCli marks the result as error when the CLI exits non-zero after a success result', async () => {

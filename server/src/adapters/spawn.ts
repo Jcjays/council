@@ -9,11 +9,15 @@ export interface SpawnOptions {
   /** Written to the child's stdin, then stdin is closed. Stdin is closed immediately when omitted. */
   stdin?: string;
   signal?: AbortSignal;
+  /** Keep the raw stdout text (for CLIs that print one multi-line JSON object). */
+  captureStdout?: boolean;
 }
 
 export interface SpawnedCli {
   /** Every JSON object line the child prints on stdout, in order. */
   lines: AsyncIterable<JsonObject>;
+  /** Raw stdout text; empty unless `captureStdout` was set. */
+  stdout: () => string;
   /** Exit code; -1 when the child was killed by a signal or failed to start. */
   exit: Promise<number>;
   /** Last 8 KB of stderr, for diagnostics. */
@@ -111,14 +115,16 @@ export function spawnCli(cmd: string, args: string[], opts: SpawnOptions): Spawn
   });
   child.stdin.end(opts.stdin ?? '');
 
+  let rawStdout = '';
   const lines = (async function* () {
     const buffer = new JsonLineBuffer();
     child.stdout.setEncoding('utf8');
     for await (const chunk of child.stdout as AsyncIterable<string>) {
+      if (opts.captureStdout) rawStdout += chunk;
       for (const obj of buffer.push(chunk)) yield obj;
     }
     for (const obj of buffer.flush()) yield obj;
   })();
 
-  return { lines, exit, stderr: () => stderrBuf, pid: child.pid };
+  return { lines, exit, stderr: () => stderrBuf, stdout: () => rawStdout, pid: child.pid };
 }

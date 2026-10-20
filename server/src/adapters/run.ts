@@ -41,13 +41,60 @@ export async function* runCli(
   if (result) {
     yield { ...result, exitCode, isError: result.isError || exitCode !== 0 };
   } else {
-    const stderr = child.stderr().trim();
-    yield {
-      type: 'result',
-      usage: ZERO_USAGE,
-      exitCode,
-      isError: exitCode !== 0,
-      text: stderr === '' ? undefined : stderr,
-    };
+    yield synthesizedResult(exitCode, exitCode !== 0, child.stderr());
   }
+}
+
+function synthesizedResult(exitCode: number, isError: boolean, detail: string): ResultEvent {
+  const text = detail.trim();
+  return { type: 'result', usage: ZERO_USAGE, exitCode, isError, text: text === '' ? undefined : text };
+}
+
+/**
+ * Runs a CLI that prints a single JSON object (possibly pretty-printed over many
+ * lines), parses it once after exit, and yields the parsed events with the exit
+ * code attached. Unparseable output becomes an error result carrying stderr and
+ * the start of stdout.
+ */
+export async function* runCliJson(
+  spec: CliSpec,
+  opts: RunCliOptions,
+  parse: (obj: JsonObject) => AdapterEvent[],
+): AsyncGenerator<AdapterEvent> {
+  const child = spawnCli(spec.cmd, spec.args, {
+    cwd: opts.cwd,
+    env: opts.env,
+    stdin: spec.stdin,
+    signal: opts.signal,
+    captureStdout: true,
+  });
+  for await (const _ of child.lines) {
+    /* drain; the object is parsed whole after exit */
+  }
+  const exitCode = await child.exit;
+  const raw = child.stdout().trim();
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    parsed = undefined;
+  }
+
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    let sawResult = false;
+    for (const ev of parse(parsed as JsonObject)) {
+      if (ev.type === 'result') {
+        sawResult = true;
+        yield { ...ev, exitCode, isError: ev.isError || exitCode !== 0 };
+      } else {
+        yield ev;
+      }
+    }
+    if (!sawResult) yield synthesizedResult(exitCode, exitCode !== 0, child.stderr());
+    return;
+  }
+
+  const detail = [child.stderr().trim(), raw.slice(0, 2000)].filter((s) => s !== '').join('\n');
+  yield synthesizedResult(exitCode, true, detail);
 }
