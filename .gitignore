@@ -2,6 +2,7 @@ node_modules/
 dist/
 *.log
 .superpowers/
+.claude/
 .worktrees/
 .env
 .DS_Store

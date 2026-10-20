@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { formatUsd, PROVIDER_NAMES, workerLabel } from '../lib/format';
 import { PROVIDERS, type Provider, type Settings, type Tab } from '../types';
 
@@ -13,6 +13,13 @@ export function VoteCard({ tab, settings, onStart }: Props) {
   const [provider, setProvider] = useState<Provider>(tab.worker?.provider ?? 'gemini');
   const [model, setModel] = useState<string>(tab.worker?.model ?? '');
   const [busy, setBusy] = useState(false);
+  // The council's pick arrives after this card first renders; follow it until the developer starts the tab.
+  useEffect(() => {
+    if (tab.status === 'awaiting-start' && tab.worker) {
+      setProvider(tab.worker.provider);
+      setModel(tab.worker.model ?? '');
+    }
+  }, [tab.status, tab.worker?.provider, tab.worker?.model]);
   if (!vote) return null;
 
   const overridden = tab.worker && (provider !== tab.worker.provider || (model || null) !== tab.worker.model);

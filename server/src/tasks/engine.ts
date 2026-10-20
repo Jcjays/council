@@ -255,9 +255,13 @@ export class TaskEngine extends EventEmitter {
     return effectiveSettings(this.deps.settings(), tab.projectId);
   }
 
+  /** Providers whose CLI is missing or not signed in; routing treats them like an exhausted budget. */
   private unavailable(): Provider[] {
     const health = this.deps.health?.() ?? {};
-    return PROVIDERS.filter((p) => health[p]?.installed === false);
+    return PROVIDERS.filter((p) => {
+      const h = health[p];
+      return h !== undefined && (h.installed === false || h.authed === false);
+    });
   }
 
   private tierFor(tab: Tab, provider: Provider): Tier | null {
