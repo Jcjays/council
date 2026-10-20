@@ -122,3 +122,34 @@ export function effectiveSettings(settings: Settings, projectId: string): Settin
   const override = settings.projectOverrides[projectId];
   return override ? { ...settings, ...override } : settings;
 }
+
+/** Live settings backed by a JSON file. `get()` always returns the current value. */
+export class SettingsStore {
+  private current: Settings;
+
+  constructor(
+    private readonly file: string,
+    initial?: Settings,
+  ) {
+    this.current = initial ?? structuredClone(DEFAULT_SETTINGS);
+  }
+
+  static async open(file: string): Promise<SettingsStore> {
+    return new SettingsStore(file, await loadSettings(file));
+  }
+
+  get(): Settings {
+    return this.current;
+  }
+
+  async update(partial: unknown): Promise<Settings> {
+    this.current = mergeSettings(this.current, partial);
+    await saveSettings(this.file, this.current);
+    return this.current;
+  }
+
+  async addRecentProject(root: string): Promise<void> {
+    const recent = [root, ...this.current.recentProjects.filter((r) => r !== root)].slice(0, 20);
+    await this.update({ recentProjects: recent });
+  }
+}

@@ -40,7 +40,10 @@ export async function readEntries(file: string): Promise<LedgerEntry[]> {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
     throw err;
   }
-  return text.split('\n').map(parseObjectLine).filter(isEntry);
+  return text.split('\n').flatMap((line) => {
+    const obj = parseObjectLine(line);
+    return isEntry(obj) ? [obj] : [];
+  });
 }
 
 function daysInMonth(year: number, monthIndex: number): number {

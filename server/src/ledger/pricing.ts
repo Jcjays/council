@@ -1,3 +1,5 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
 import type { Provider, Usage } from '../adapters/types.js';
 
 /** USD per one million tokens. */
@@ -61,6 +63,41 @@ export function lookupPrice(provider: Provider, model: string | null, table: Pri
     if (best !== undefined) return table[best];
   }
   return table[`${provider}:default`];
+}
+
+/** Editable price table backed by `pricing.json`; unknown files start from the defaults. */
+export class PricingStore {
+  private table: PriceTable;
+
+  constructor(
+    private readonly file: string,
+    initial: PriceTable = DEFAULT_PRICING,
+  ) {
+    this.table = structuredClone(initial);
+  }
+
+  static async open(file: string): Promise<PricingStore> {
+    try {
+      const parsed = JSON.parse(await fs.readFile(file, 'utf8')) as PriceTable;
+      return new PricingStore(file, { ...DEFAULT_PRICING, ...parsed });
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+        console.warn(`[council] ${file} could not be read (${(err as Error).message}); using default prices`);
+      }
+      return new PricingStore(file);
+    }
+  }
+
+  get(): PriceTable {
+    return this.table;
+  }
+
+  async update(partial: PriceTable): Promise<PriceTable> {
+    this.table = { ...this.table, ...partial };
+    await fs.mkdir(path.dirname(this.file), { recursive: true });
+    await fs.writeFile(this.file, `${JSON.stringify(this.table, null, 2)}\n`, 'utf8');
+    return this.table;
+  }
 }
 
 export function costFor(provider: Provider, model: string | null, usage: Usage, table: PriceTable = DEFAULT_PRICING): number {

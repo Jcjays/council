@@ -42,6 +42,11 @@ function label(w: WorkerPick): string {
   return `${w.provider} (${w.model ?? 'default'})`;
 }
 
+/** Read through a function so TypeScript does not keep a stale narrowing across awaits. */
+function isClosed(tab: Tab): boolean {
+  return tab.status === 'closed';
+}
+
 /**
  * Owns every tab: council votes, worker runs, escalation and switching, merge and
  * close. Emits `tab` (full tab after each change), `item` ({tabId, item}),
@@ -61,6 +66,10 @@ export class TaskEngine extends EventEmitter {
 
   getTab(id: string): Tab | undefined {
     return this.tabs.get(id);
+  }
+
+  projectIdFor(projectRoot: string): string {
+    return this.deps.store.projectId(projectRoot);
   }
 
   listTabs(projectId?: string): Tab[] {
@@ -316,9 +325,11 @@ export class TaskEngine extends EventEmitter {
       pricing: this.deps.pricing(),
       timeoutMs: s.seatTimeoutMs,
       costCeiling: s.voteCostCeiling,
-      onResult: (provider, model, ev) => this.record(tab, provider, model, 'vote', ev),
+      onResult: async (provider, model, ev) => {
+        await this.record(tab, provider, model, 'vote', ev);
+      },
     });
-    if (tab.status === 'closed') return;
+    if (isClosed(tab)) return;
 
     tab.vote = result;
     const decision = route(result.decision, s.tierMap, await this.budgets(), this.unavailable());
@@ -338,7 +349,7 @@ export class TaskEngine extends EventEmitter {
   }
 
   private async runWorker(tab: Tab, prompt: string): Promise<void> {
-    if (tab.status === 'closed') return;
+    if (isClosed(tab)) return;
     const s = this.settingsFor(tab);
     const worker = tab.worker;
     if (!worker) throw new Error('no worker assigned');
@@ -371,7 +382,7 @@ export class TaskEngine extends EventEmitter {
         signal: run.ac.signal,
       });
       for await (const ev of events) {
-        if (tab.status === 'closed') break;
+        if (isClosed(tab)) break;
         tab.stalled = false;
         armStall();
         switch (ev.type) {
@@ -414,7 +425,7 @@ export class TaskEngine extends EventEmitter {
       this.runs.delete(tab.id);
     }
 
-    if (tab.status === 'closed') return;
+    if (isClosed(tab)) return;
     tab.stalled = false;
     if (threw !== undefined) this.addItem(tab, 'error', threw);
     const failed = threw !== undefined || !result || result.isError;
@@ -482,7 +493,7 @@ export class TaskEngine extends EventEmitter {
         /* no diff available */
       }
     }
-    if (tab.status === 'closed') return;
+    if (isClosed(tab)) return;
     const prompt = buildHandoffPrompt({ task: this.taskText(tab), summary, diffStat, fromWorker: label(from), reason });
     tab.status = transition(tab.status, 'handoff-ready');
     await this.touch(tab);
