@@ -43,10 +43,13 @@ export type AdapterEvent =
 
 export type ResultEvent = Extract<AdapterEvent, { type: 'result' }>;
 
+export type AuthSource = 'api-key' | 'login' | 'none' | 'unknown';
+
 export interface CliHealth {
   installed: boolean;
   version?: string;
   authed: boolean;
+  authSource?: AuthSource;
   error?: string;
 }
 
