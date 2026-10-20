@@ -1,0 +1,55 @@
+import { expect, test } from 'vitest';
+import { canEscalate, InvalidTransition, TAB_STATUSES, transition, type TabStatus } from '../src/tasks/state.js';
+
+test('the happy path: vote, start, work, idle, follow-up', () => {
+  let s: TabStatus = 'drafting';
+  s = transition(s, 'submit-auto');
+  expect(s).toBe('voting');
+  s = transition(s, 'vote-done');
+  expect(s).toBe('awaiting-start');
+  s = transition(s, 'start');
+  expect(s).toBe('running');
+  s = transition(s, 'worker-done');
+  expect(s).toBe('idle');
+  s = transition(s, 'message');
+  expect(s).toBe('running');
+});
+
+test('manual submit and auto-start skip the pause', () => {
+  expect(transition('drafting', 'submit-manual')).toBe('running');
+  expect(transition('voting', 'vote-done-autostart')).toBe('running');
+});
+
+test('a worker failure lands in failed', () => {
+  expect(transition('running', 'worker-failed')).toBe('failed');
+});
+
+test('escalate and switch hand the tab off from idle or failed, then run again', () => {
+  expect(transition('idle', 'escalate')).toBe('handing-off');
+  expect(transition('failed', 'escalate')).toBe('handing-off');
+  expect(transition('idle', 'switch')).toBe('handing-off');
+  expect(transition('failed', 'switch')).toBe('handing-off');
+  expect(transition('handing-off', 'handoff-ready')).toBe('running');
+});
+
+test('merge-done is reachable from idle and failed', () => {
+  expect(transition('idle', 'merge-done')).toBe('merged');
+  expect(transition('failed', 'merge-done')).toBe('merged');
+});
+
+test('close works from every state', () => {
+  for (const s of TAB_STATUSES) expect(transition(s, 'close')).toBe('closed');
+});
+
+test('invalid transitions throw InvalidTransition', () => {
+  expect(() => transition('idle', 'start')).toThrow(InvalidTransition);
+  expect(() => transition('running', 'message')).toThrow(InvalidTransition);
+  expect(() => transition('closed', 'message')).toThrow(InvalidTransition);
+  expect(() => transition('drafting', 'escalate')).toThrow(/drafting.*escalate/);
+});
+
+test('canEscalate is false only at the top tier', () => {
+  expect(canEscalate('easy')).toBe(true);
+  expect(canEscalate('medium')).toBe(true);
+  expect(canEscalate('hard')).toBe(false);
+});
