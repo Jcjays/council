@@ -70,7 +70,10 @@ export function describeWindow(w: { name: string; usedPct: number; resetsAt?: st
       hours += 1;
       minutes = 0;
     }
-    text += `, resets in ${hours > 0 ? `${hours}h ` : ''}${minutes}m`;
+    if (hours >= 24) {
+      const days = Math.floor(hours / 24);
+      text += `, resets in ${days}d ${hours % 24}h`;
+    } else text += `, resets in ${hours > 0 ? `${hours}h ` : ''}${minutes}m`;
   }
   return text;
 }
