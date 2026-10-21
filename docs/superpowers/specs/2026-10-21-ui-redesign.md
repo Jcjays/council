@@ -48,9 +48,11 @@ board (Council tabs are not a backlog) and without a component library.
    gets a *Details* pane: worker and session, routing (tier, shifted-from, hand-off history), branch and worktree with
    the last merge outcome and the merge actions, cost of the tab (work vs. council votes), and files touched (derived
    from the transcript's edit tools; the server has no diff endpoint and this version does not add one).
-8. **Keyboard map and a help overlay.** Ctrl+N new tab, Ctrl+, settings, Ctrl+Shift+] / [ next and previous tab,
-   Alt+Shift+↓ / ↑ next and previous tab that needs you, Ctrl+1…9 jump to a tab, Ctrl+Shift+I toggle details,
-   Ctrl+/ shortcut help, Esc closes overlays, Enter sends and Shift+Enter breaks a line (unchanged).
+8. **Keyboard map and a help overlay.** Alt is the modifier, because a web page cannot override the Ctrl chords
+   browsers keep for themselves (Ctrl+N, Ctrl+Shift+I). Alt+N new tab, Alt+S settings, Alt+↓ / ↑ next and previous
+   tab, Alt+Shift+↓ / ↑ next and previous tab that needs you, Alt+1…9 jump to a tab, Alt+I toggle details,
+   Alt+/ shortcut help, Esc closes overlays, Enter sends and Shift+Enter breaks a line (unchanged). The URL hash
+   (`#tab=<id>`, `#settings`) follows the selection so a reload lands on the same place.
 9. **Visual rules from DESIGN.md.** Colour is semantic and never the only signal; one status slot per row; sentence
    case; 1 px hairlines; no gradients or glass; tabular numbers; weights 500/600 only; 4 px spacing scale;
    120–150 ms motion. Light and dark as first-class themes with a manual override (system / light / dark).
