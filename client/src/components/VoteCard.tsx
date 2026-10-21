@@ -1,11 +1,14 @@
 import { useEffect, useState } from 'react';
 import { costSource, formatUsd, PROVIDER_NAMES } from '../lib/format';
-import { PROVIDERS, type CouncilResult, type Provider, type Settings, type Tab } from '../types';
+import { type Availability } from '../lib/routing';
+import type { CouncilResult, Provider, Settings, Tab } from '../types';
 import { Glyph } from './Glyph';
+import { ProviderSelect } from './ProviderSelect';
 
 interface Props {
   tab: Tab;
   settings: Settings;
+  available: Availability;
   onStart: (pick?: { provider: Provider; model: string | null }) => Promise<void>;
 }
 
@@ -18,7 +21,7 @@ export function tally(vote: CouncilResult): string {
 }
 
 /** The council's vote: expanded until the developer starts the worker, then a one-line summary that opens on click. */
-export function VoteCard({ tab, settings, onStart }: Props) {
+export function VoteCard({ tab, settings, available, onStart }: Props) {
   const vote = tab.vote;
   const [provider, setProvider] = useState<Provider>(tab.worker?.provider ?? 'gemini');
   const [model, setModel] = useState<string>(tab.worker?.model ?? '');
@@ -37,13 +40,15 @@ export function VoteCard({ tab, settings, onStart }: Props) {
   const open = manual ?? awaiting;
   const overridden = tab.worker && (provider !== tab.worker.provider || (model || null) !== tab.worker.model);
   const voteCost = vote.seats.reduce((s, x) => s + x.costUsd, 0);
+  const notes = tab.routing?.notes ?? [];
+  const single = vote.seats.length === 1;
 
   return (
     <section className="card vote-card" aria-label="Council vote">
       <button className="vote-summary" onClick={() => setManual(!open)} aria-expanded={open}>
-        <b>Council voted</b>
+        <b>{single ? 'Council of one voted' : 'Council voted'}</b>
         <span className={`tier tier-${vote.decision}`}>{vote.decision}</span>
-        <span>{tally(vote)}</span>
+        {!single && <span>{tally(vote)}</span>}
         {vote.tie && <span className="muted">tie broken</span>}
         {!open && (
           <>
@@ -88,7 +93,16 @@ export function VoteCard({ tab, settings, onStart }: Props) {
               </div>
             ))}
           </div>
-          {tab.routing?.reason && <div className="note">{tab.routing.reason}</div>}
+          {(tab.routing?.reason || notes.length > 0) && (
+            <div className="notes" aria-label="Routing notes">
+              {tab.routing?.reason && <div className="note-row warn-text">{tab.routing.reason}</div>}
+              {notes.map((n) => (
+                <div key={n} className="note-row">
+                  {n}
+                </div>
+              ))}
+            </div>
+          )}
           <div className="vote-start">
             <span className="row gap-sm">
               Routed to
@@ -107,13 +121,7 @@ export function VoteCard({ tab, settings, onStart }: Props) {
             {awaiting && (
               <>
                 <span className="grow" />
-                <select value={provider} onChange={(e) => setProvider(e.target.value as Provider)} aria-label="Worker provider">
-                  {PROVIDERS.map((p) => (
-                    <option key={p} value={p}>
-                      {PROVIDER_NAMES[p]}
-                    </option>
-                  ))}
-                </select>
+                <ProviderSelect value={provider} onChange={setProvider} available={available} ariaLabel="Worker provider" />
                 <input list={`models-${provider}`} value={model} onChange={(e) => setModel(e.target.value)} placeholder="default model" aria-label="Worker model" />
                 <datalist id={`models-${provider}`}>
                   {settings.models[provider].map((m) => (

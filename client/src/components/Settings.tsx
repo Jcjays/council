@@ -1,32 +1,29 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import { PROVIDER_NAMES } from '../lib/format';
+import { type Availability } from '../lib/routing';
 import { editableSettings } from '../lib/settingsPatch';
 import { PROVIDERS, TIERS, type CliHealth, type PriceTable, type Provider, type Seat, type Settings as SettingsT, type Tier } from '../types';
 import { Glyph } from './Glyph';
 import { Health } from './Health';
+import { ProviderSelect } from './ProviderSelect';
 
 interface Props {
   settings: SettingsT;
   onSaved: (s: SettingsT) => void;
   health: Record<Provider, CliHealth> | null;
+  available: Availability;
   onError: (m: string) => void;
 }
 
 const TIER_WORDS: Record<Tier, string> = { easy: 'Easy tasks', medium: 'Medium tasks', hard: 'Hard tasks' };
 
-function SeatRow({ seat, models, onChange, onRemove, label }: { seat: Seat; models: Record<Provider, string[]>; onChange: (s: Seat) => void; onRemove?: () => void; label: string }) {
+function SeatRow({ seat, models, available, onChange, onRemove, label }: { seat: Seat; models: Record<Provider, string[]>; available: Availability; onChange: (s: Seat) => void; onRemove?: () => void; label: string }) {
   const listId = `seat-models-${label.replace(/\W+/g, '-')}-${seat.provider}`;
   return (
     <div className="seat-row">
       <Glyph provider={seat.provider} />
-      <select value={seat.provider} onChange={(e) => onChange({ ...seat, provider: e.target.value as Provider })} aria-label={`${label}: provider`}>
-        {PROVIDERS.map((p) => (
-          <option key={p} value={p}>
-            {PROVIDER_NAMES[p]}
-          </option>
-        ))}
-      </select>
+      <ProviderSelect value={seat.provider} onChange={(p) => onChange({ ...seat, provider: p })} available={available} ariaLabel={`${label}: provider`} />
       <input list={listId} value={seat.model ?? ''} onChange={(e) => onChange({ ...seat, model: e.target.value || null })} placeholder="default model" aria-label={`${label}: model`} />
       <datalist id={listId}>
         {models[seat.provider].map((m) => (
@@ -58,7 +55,7 @@ function healthProblems(health: Record<Provider, CliHealth> | null): string[] {
  * what, the council seats and two toggles. Everything else sits behind
  * "Advanced" with defaults that most people never touch.
  */
-export function Settings({ settings, onSaved, health, onError }: Props) {
+export function Settings({ settings, onSaved, health, available, onError }: Props) {
   const [s, setS] = useState<SettingsT>(settings);
   const [pricing, setPricing] = useState<PriceTable | null>(null);
   const [loadedPricing, setLoadedPricing] = useState<PriceTable | null>(null);
@@ -152,7 +149,7 @@ export function Settings({ settings, onSaved, health, onError }: Props) {
             <div key={t} className="seat-row">
               <span className={`tier tier-${t} tier-wide`}>{t}</span>
               <span className="sec tier-word">{TIER_WORDS[t]} →</span>
-              <SeatRow label={TIER_WORDS[t]} seat={s.tierMap[t]} models={s.models} onChange={(ns) => setS({ ...s, tierMap: { ...s.tierMap, [t]: ns } })} />
+              <SeatRow label={TIER_WORDS[t]} seat={s.tierMap[t]} models={s.models} available={available} onChange={(ns) => setS({ ...s, tierMap: { ...s.tierMap, [t]: ns } })} />
             </div>
           ))}
           <div className="toggles">
@@ -174,6 +171,7 @@ export function Settings({ settings, onSaved, health, onError }: Props) {
               label={`Seat ${i + 1}`}
               seat={seat}
               models={s.models}
+              available={available}
               onChange={(ns) => setS({ ...s, seats: s.seats.map((x, j) => (j === i ? ns : x)) })}
               onRemove={s.seats.length > 1 ? () => setS({ ...s, seats: s.seats.filter((_, j) => j !== i) }) : undefined}
             />

@@ -4,18 +4,21 @@ import { useNow } from '../hooks/useNow';
 import { useStickToBottom } from '../hooks/useStickToBottom';
 import { costSource, formatUsd, PROVIDER_NAMES } from '../lib/format';
 import { isStreaming, statusPhrase, tabChips, toneOf } from '../lib/lanes';
+import { firstSetUp, noneSetUp, type Availability } from '../lib/routing';
 import { shouldAskAboutStall, stallMessage } from '../lib/stall';
-import { PROVIDERS, type Provider, type Settings, type SubmitMode, type Tab } from '../types';
+import type { Provider, Settings, SubmitMode, Tab } from '../types';
 import { Composer } from './Composer';
 import { Details } from './Details';
 import { Glyph } from './Glyph';
 import { Steps } from './Home';
+import { ProviderSelect } from './ProviderSelect';
 import { Transcript } from './Transcript';
 import { VoteCard } from './VoteCard';
 
 interface Props {
   tab: Tab;
   settings: Settings;
+  available: Availability;
   /** Number of stall notices received for this tab. */
   stallSeq: number;
   details: boolean;
@@ -23,9 +26,9 @@ interface Props {
   onError: (message: string) => void;
 }
 
-export function TabView({ tab, settings, stallSeq, details, onToggleDetails, onError }: Props) {
+export function TabView({ tab, settings, available, stallSeq, details, onToggleDetails, onError }: Props) {
   const [switching, setSwitching] = useState(false);
-  const [switchProvider, setSwitchProvider] = useState<Provider>('claude');
+  const [switchProvider, setSwitchProvider] = useState<Provider>(() => firstSetUp(available, 'claude'));
   const [switchModel, setSwitchModel] = useState('');
   const [closing, setClosing] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -51,6 +54,7 @@ export function TabView({ tab, settings, stallSeq, details, onToggleDetails, onE
   const askingAboutStall = shouldAskAboutStall(tab, stallSeq, dismissedStall);
   const chips = tabChips(tab);
   const drafting = tab.status === 'drafting' && tab.transcript.length === 0;
+  const nothingSetUp = noneSetUp(available);
 
   return (
     <main className={`tabview${details ? ' with-details' : ''}`}>
@@ -106,13 +110,7 @@ export function TabView({ tab, settings, stallSeq, details, onToggleDetails, onE
           {switching && settled && (
             <div className="card inline-form">
               <span>Hand this tab to</span>
-              <select value={switchProvider} onChange={(e) => setSwitchProvider(e.target.value as Provider)} aria-label="Switch provider">
-                {PROVIDERS.map((p) => (
-                  <option key={p} value={p}>
-                    {PROVIDER_NAMES[p]}
-                  </option>
-                ))}
-              </select>
+              <ProviderSelect value={switchProvider} onChange={setSwitchProvider} available={available} ariaLabel="Switch provider" />
               <input list="switch-models" value={switchModel} onChange={(e) => setSwitchModel(e.target.value)} placeholder="default model" aria-label="Switch model" />
               <datalist id="switch-models">
                 {settings.models[switchProvider].map((m) => (
@@ -181,7 +179,7 @@ export function TabView({ tab, settings, stallSeq, details, onToggleDetails, onE
             <div className="draft-intro">
               <h3>What should the council work on?</h3>
               <p className="sec">
-                Describe the task below. Auto lets three cheap seats rate it and route it; or pick a provider to skip the vote. The worker edits this checkout directly and follows its CLAUDE.md, AGENTS.md or GEMINI.md.
+                Describe the task below. Auto lets the council rate it and route it; or pick a provider to skip the vote. The worker edits this checkout directly and follows its CLAUDE.md, AGENTS.md or GEMINI.md.
               </p>
               <Steps />
             </div>
@@ -191,7 +189,7 @@ export function TabView({ tab, settings, stallSeq, details, onToggleDetails, onE
             items={tab.transcript}
             provider={tab.worker?.provider ?? null}
             pathBase={tab.projectRoot}
-            voteCard={tab.vote ? <VoteCard tab={tab} settings={settings} onStart={(pick) => act(() => api.start(tab.id, pick))} /> : undefined}
+            voteCard={tab.vote ? <VoteCard tab={tab} settings={settings} available={available} onStart={(pick) => act(() => api.start(tab.id, pick))} /> : undefined}
           />
 
           {!pinned && (
@@ -203,13 +201,21 @@ export function TabView({ tab, settings, stallSeq, details, onToggleDetails, onE
           )}
         </div>
 
-        <Composer
-          tab={tab}
-          settings={settings}
-          onSubmit={(text: string, mode: SubmitMode, fullAuto: boolean) => act(() => api.submit(tab.id, text, mode, fullAuto))}
-          onSend={(text: string) => act(() => api.send(tab.id, text))}
-          onSwitch={(provider: Provider, model: string | null) => act(() => api.switchWorker(tab.id, provider, model))}
-        />
+        {nothingSetUp && tab.status !== 'closed' ? (
+          <div className="setup" role="status">
+            <h3>No coding CLI is set up</h3>
+            <p className="sec sm">Council drives Claude Code, Codex CLI and Gemini CLI. Install one, sign in, and this tab can take a task. The details are under Settings › Advanced › CLI health.</p>
+          </div>
+        ) : (
+          <Composer
+            tab={tab}
+            settings={settings}
+            available={available}
+            onSubmit={(text: string, mode: SubmitMode, fullAuto: boolean) => act(() => api.submit(tab.id, text, mode, fullAuto))}
+            onSend={(text: string) => act(() => api.send(tab.id, text))}
+            onSwitch={(provider: Provider, model: string | null) => act(() => api.switchWorker(tab.id, provider, model))}
+          />
+        )}
       </div>
 
       {details && <Details tab={tab} />}

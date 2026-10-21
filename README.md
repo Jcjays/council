@@ -38,9 +38,15 @@ Then open <http://localhost:4317>. Set `PORT` to use another port. During develo
 
 Council keeps its data in `~/.council` (`settings.json`, `pricing.json`, `ledger.jsonl`, and one folder per project with its tabs). Set `COUNCIL_HOME` to put it elsewhere.
 
+## One, two or three CLIs
+
+Council works with whatever is installed and signed in. With all three, the council and tier map are what Settings says. With one provider, its cheapest model votes alone and the tiers climb that provider's own model ladder (for Claude: easy → Haiku, medium → Sonnet, hard → Opus; the ladder is the model list in Settings, cheapest first). With two, a tier whose provider is missing is filled from the nearest configured provider, and a tier that would reuse the rung below it moves one rung up. The vote card says what substitution was made, and the pickers only offer providers that are set up. With none, the app shows the setup panel instead of a composer.
+
 ## Budgets and prices
 
 Each provider has a monthly limit (defaults: Claude $40, Codex $30, Gemini $30, reset on the 1st). Every CLI run, including votes and hand-off summaries, is appended to `ledger.jsonl` and summed for the current period. At 80% a budget bar turns amber; at 100% the provider counts as exhausted and auto routing avoids it. Picking it by hand still works.
+
+Plan usage is detected automatically where the CLI reports it: Claude Code streams the account's five-hour and seven-day windows during every run, and Codex attaches rate-limit snapshots to its events. Those windows appear under the provider's budget bar with the time to reset, straight from the CLI, no setup needed. Plain API keys expose no remaining-credit figure, so the dollar limits above stay a one-time entry; the spend against them is always tracked automatically.
 
 Claude Code reports its own cost per run and that number is used as is. If you run Claude on a subscription rather than an API key, it is the list-price equivalent, not money leaving your account. Codex and Gemini report tokens only, so Council multiplies them by the price table in Settings. The seeded prices come from public price pages and are meant to be checked and edited; prices are per million tokens and a row can be an exact model name, a prefix, or `<provider>:default`.
 

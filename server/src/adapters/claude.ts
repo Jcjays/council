@@ -1,7 +1,24 @@
 import type { JsonObject } from './jsonl.js';
 import { runCli } from './run.js';
 import { resolveCommand } from './spawn.js';
-import { num, VOTE_MAX_BUDGET_USD, type AdapterEvent, type CliSpec, type RunOptions } from './types.js';
+import { isoFromEpoch, num, VOTE_MAX_BUDGET_USD, type AdapterEvent, type CliSpec, type QuotaWindow, type RunOptions } from './types.js';
+
+const CLAUDE_WINDOW_NAMES: Record<string, string> = { five_hour: '5-hour', seven_day: '7-day' };
+
+function quotaFromRateLimit(o: JsonObject): AdapterEvent[] {
+  const info = o.rate_limit_info;
+  if (!info || typeof info !== 'object') return [];
+  const unified = (info as JsonObject).unifiedWindows;
+  if (!unified || typeof unified !== 'object') return [];
+  const windows: QuotaWindow[] = [];
+  for (const [key, value] of Object.entries(unified as Record<string, unknown>)) {
+    if (!value || typeof value !== 'object') continue;
+    const w = value as JsonObject;
+    if (typeof w.utilization !== 'number') continue;
+    windows.push({ name: CLAUDE_WINDOW_NAMES[key] ?? key.replace(/_/g, '-'), usedPct: w.utilization, resetsAt: isoFromEpoch(w.resetsAt) });
+  }
+  return windows.length > 0 ? [{ type: 'quota', windows }] : [];
+}
 
 /**
  * Claude Code in print mode. Work runs edit freely but shell commands are limited
@@ -46,6 +63,9 @@ export function parseClaudeLine(o: JsonObject): AdapterEvent[] {
   switch (o.type) {
     case 'system':
       return o.subtype === 'init' && typeof o.session_id === 'string' ? [{ type: 'session', id: o.session_id }] : [];
+
+    case 'rate_limit_event':
+      return quotaFromRateLimit(o);
 
     case 'assistant': {
       const out: AdapterEvent[] = [];

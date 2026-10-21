@@ -7,11 +7,24 @@ import { Sidebar } from './components/Sidebar';
 import { TabView } from './components/TabView';
 import { useNow } from './hooks/useNow';
 import { laneOf, stepThrough, visibleOrder } from './lib/lanes';
+import { noneSetUp } from './lib/routing';
 import { shortcutAction } from './lib/shortcuts';
-import type { BudgetState, CliHealth, ProjectInfo, Provider, Settings as SettingsT, Tab, TranscriptItem } from './types';
+import type { BudgetState, CliHealth, EffectiveRouting, ProjectInfo, Provider, Settings as SettingsT, Tab, TranscriptItem } from './types';
 import { useSocket } from './useSocket';
 
 const DETAILS_KEY = 'council.details';
+/** How often health and the effective routing are re-read, so a CLI signed in while the page is open gets noticed. */
+const HEALTH_REFRESH_MS = 60_000;
+
+function readDetailsPref(): boolean {
+  try {
+    const v = localStorage.getItem(DETAILS_KEY);
+    // Open by default only where the pane has its own column (see the 1200px breakpoint in styles.css).
+    return v === null ? window.innerWidth > 1200 : v === '1';
+  } catch {
+    return true;
+  }
+}
 
 /** `#tab=<id>` or `#settings`, so a reload or a shared link lands on the same place. */
 function readHash(): { tab?: string; settings?: boolean } {
@@ -25,21 +38,12 @@ function writeHash(next: string) {
   if (location.hash !== next) history.replaceState(null, '', next || location.pathname + location.search);
 }
 
-function readDetailsPref(): boolean {
-  try {
-    const v = localStorage.getItem(DETAILS_KEY);
-    // Open by default only where the pane has its own column (see the 1200px breakpoint in styles.css).
-    return v === null ? window.innerWidth > 1200 : v === '1';
-  } catch {
-    return true;
-  }
-}
-
 export function App() {
   const [tabs, setTabs] = useState<Record<string, Tab>>({});
   const [budgets, setBudgets] = useState<Record<Provider, BudgetState> | null>(null);
   const [settings, setSettings] = useState<SettingsT | null>(null);
   const [health, setHealth] = useState<Record<Provider, CliHealth> | null>(null);
+  const [routing, setRouting] = useState<EffectiveRouting | null>(null);
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
   const [project, setProject] = useState<ProjectInfo | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -83,6 +87,43 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    api.settings().then(setSettings).catch((e: Error) => onError(e.message));
+    api.budgets().then(setBudgets).catch(() => {});
+    api
+      .projects()
+      .then(async (list) => {
+        setProjects(list);
+        if (list[0]) await openProject(list[0].root);
+      })
+      .catch((e: Error) => onError(e.message));
+  }, [onError, openProject]);
+
+  // Health and the routing in force (which CLIs are set up) for the open project; re-read now and then.
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () => {
+      api
+        .health()
+        .then((h) => {
+          if (!cancelled) setHealth(h);
+          return api.routing(project?.projectId);
+        })
+        .then((r) => {
+          if (!cancelled) setRouting(r);
+        })
+        .catch(() => {
+          if (!cancelled) setHealth(null);
+        });
+    };
+    refresh();
+    const t = setInterval(refresh, HEALTH_REFRESH_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [project?.projectId]);
+
+  useEffect(() => {
     const wanted = wantedTab ? tabs[wantedTab] : undefined;
     if (!wanted || !project) return;
     setSelectedId(wanted.id);
@@ -95,24 +136,12 @@ export function App() {
     writeHash(view === 'settings' ? '#settings' : selectedId ? `#tab=${selectedId}` : '');
   }, [view, selectedId]);
 
-  useEffect(() => {
-    api.settings().then(setSettings).catch((e: Error) => onError(e.message));
-    api.health().then(setHealth).catch(() => setHealth(null));
-    api.budgets().then(setBudgets).catch(() => {});
-    api
-      .projects()
-      .then(async (list) => {
-        setProjects(list);
-        if (list[0]) await openProject(list[0].root);
-      })
-      .catch((e: Error) => onError(e.message));
-  }, [onError, openProject]);
-
   const projectTabs = useMemo(() => Object.values(tabs).filter((t) => project && t.projectId === project.projectId), [tabs, project]);
   const openTabs = useMemo(() => projectTabs.filter((t) => t.status !== 'closed'), [projectTabs]);
   const selectedTab = selectedId ? tabs[selectedId] : undefined;
   /** The selected tab, when it belongs to the open project; a tab from another project is simply not shown. */
   const selected = selectedTab && project && selectedTab.projectId === project.projectId ? selectedTab : undefined;
+  const available = routing?.available ?? null;
 
   const select = useCallback((id: string | null) => {
     if (id) setSelectedId(id);
@@ -120,7 +149,7 @@ export function App() {
   }, []);
 
   const newTab = useCallback(async () => {
-    if (!project) return;
+    if (!project || noneSetUp(available)) return;
     try {
       const tab = await api.createTab(project.root, '');
       setTabs((prev) => ({ ...prev, [tab.id]: tab }));
@@ -128,7 +157,7 @@ export function App() {
     } catch (err) {
       onError((err as Error).message);
     }
-  }, [project, select, onError]);
+  }, [project, available, select, onError]);
 
   const toggleDetails = useCallback(() => {
     setDetails((d) => {
@@ -190,25 +219,28 @@ export function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, [help, projectTabs, selectedId, newTab, select, toggleDetails]);
 
+  const openFromUi = async (p: string) => {
+    try {
+      await openProject(p);
+      setView('tabs');
+    } catch (err) {
+      onError((err as Error).message);
+    }
+  };
+
   return (
     <div className="app">
       <Sidebar
         projects={projects}
         project={project}
-        onOpenProject={async (p) => {
-          try {
-            await openProject(p);
-            setView('tabs');
-          } catch (err) {
-            onError((err as Error).message);
-          }
-        }}
+        onOpenProject={openFromUi}
         tabs={projectTabs}
         selectedId={selectedId}
         onSelect={select}
         onNewTab={() => void newTab()}
         budgets={budgets}
         resetDay={settings?.resetDay ?? 1}
+        available={available}
         view={view}
         onView={setView}
         onHelp={() => setHelp(true)}
@@ -230,23 +262,11 @@ export function App() {
           </div>
         )}
         {view === 'settings' && settings ? (
-          <Settings settings={settings} onSaved={setSettings} health={health} onError={onError} />
+          <Settings settings={settings} onSaved={setSettings} health={health} available={available} onError={onError} />
         ) : selected && settings ? (
-          <TabView key={selected.id} tab={selected} settings={settings} stallSeq={stallSeq[selected.id] ?? 0} details={details} onToggleDetails={toggleDetails} onError={onError} />
+          <TabView key={selected.id} tab={selected} settings={settings} available={available} stallSeq={stallSeq[selected.id] ?? 0} details={details} onToggleDetails={toggleDetails} onError={onError} />
         ) : (
-          <Home
-            projects={projects}
-            project={project}
-            openTabs={openTabs.length}
-            onOpenProject={async (p) => {
-              try {
-                await openProject(p);
-              } catch (err) {
-                onError((err as Error).message);
-              }
-            }}
-            onNewTab={() => void newTab()}
-          />
+          <Home projects={projects} project={project} openTabs={openTabs.length} available={available} notes={routing?.notes ?? []} health={health} onOpenProject={openFromUi} onNewTab={() => void newTab()} onSettings={() => setView('settings')} />
         )}
       </div>
       {help && <ShortcutHelp onClose={() => setHelp(false)} />}

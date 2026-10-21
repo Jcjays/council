@@ -81,6 +81,25 @@ test('turn.failed is an error result carrying the message', () => {
   expect(r).toMatchObject({ type: 'result', isError: true, text: 'rate limited', usage: { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 } });
 });
 
+test('a rate_limits snapshot becomes a quota event ahead of the result', () => {
+  const events = parseCodexLine({
+    type: 'turn.completed',
+    usage: { input_tokens: 10, cached_input_tokens: 0, output_tokens: 1 },
+    rate_limits: {
+      primary: { used_percent: 12.5, window_minutes: 300, resets_at: 1792512600 },
+      secondary: { used_percent: 40, window_minutes: 10080, resets_at: 1792767600 },
+    },
+  });
+  expect(events.map((e) => e.type)).toEqual(['quota', 'result']);
+  expect(events[0]).toEqual({
+    type: 'quota',
+    windows: [
+      { name: '5-hour', usedPct: 0.125, resetsAt: new Date(1792512600 * 1000).toISOString() },
+      { name: '7-day', usedPct: 0.4, resetsAt: new Date(1792767600 * 1000).toISOString() },
+    ],
+  });
+});
+
 test('top-level error events map to error', () => {
   expect(parseCodexLine({ type: 'error', message: 'boom' })).toEqual([{ type: 'error', message: 'boom' }]);
 });

@@ -29,7 +29,7 @@ export interface Tab {
   worker: TabWorker | null;
   previousWorkers: TabWorker[];
   vote: CouncilResult | null;
-  routing: { shiftedFrom?: Tier; reason?: string } | null;
+  routing: { shiftedFrom?: Tier; reason?: string; notes?: string[] } | null;
   transcript: TranscriptItem[];
   costUsd: number;
   fullAuto: boolean;

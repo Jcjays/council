@@ -1,4 +1,5 @@
 import { laneCounts } from '../lib/lanes';
+import { noneSetUp, type Availability } from '../lib/routing';
 import type { BudgetState, ProjectInfo, Provider, Tab } from '../types';
 import { BudgetBars } from './BudgetBars';
 import { ProjectPicker } from './ProjectPicker';
@@ -15,6 +16,7 @@ interface Props {
   onNewTab: () => void;
   budgets: Record<Provider, BudgetState> | null;
   resetDay: number;
+  available: Availability;
   view: 'tabs' | 'settings';
   onView: (v: 'tabs' | 'settings') => void;
   onHelp: () => void;
@@ -24,6 +26,7 @@ interface Props {
 
 export function Sidebar(p: Props) {
   const counts = laneCounts(p.tabs);
+  const nothingSetUp = noneSetUp(p.available);
   return (
     <aside className="sidebar">
       <div className="brand">
@@ -39,21 +42,21 @@ export function Sidebar(p: Props) {
       <ProjectPicker projects={p.projects} project={p.project} onOpenProject={p.onOpenProject} />
 
       <div className="newtab">
-        <button onClick={p.onNewTab} disabled={!p.project} title={p.project ? 'Create a tab and describe a task' : 'Open a project first'}>
+        <button onClick={p.onNewTab} disabled={!p.project || nothingSetUp} title={nothingSetUp ? 'No coding CLI is set up yet' : p.project ? 'Create a tab and describe a task' : 'Open a project first'}>
           <span>+ New tab</span>
           <kbd>Alt N</kbd>
         </button>
       </div>
 
-      <TabList tabs={p.tabs} selectedId={p.selectedId} onSelect={p.onSelect} now={p.now} emptyText={p.project ? 'No tabs yet. Create one and describe a task.' : 'Open a project to start.'} />
+      <TabList tabs={p.tabs} selectedId={p.selectedId} onSelect={p.onSelect} now={p.now} emptyText={p.project ? (nothingSetUp ? 'Set up a coding CLI to start.' : 'No tabs yet. Create one and describe a task.') : 'Open a project to start.'} />
 
-      <BudgetBars budgets={p.budgets} resetDay={p.resetDay} />
+      <BudgetBars budgets={p.budgets} resetDay={p.resetDay} available={p.available} now={p.now} />
 
       <div className="foot">
+        <span>{counts.working} working</span>
         <span>
-          {counts.working} working
+          {counts.needsYou} need{counts.needsYou === 1 ? 's' : ''} you
         </span>
-        <span>{counts.needsYou} need{counts.needsYou === 1 ? 's' : ''} you</span>
         <span className="spacer" />
         <button className="link" onClick={p.onHelp} title="Keyboard shortcuts (Alt+/)">
           Alt+/ shortcuts

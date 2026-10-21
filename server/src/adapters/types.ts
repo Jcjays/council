@@ -33,8 +33,17 @@ export interface RunOptions {
   env?: NodeJS.ProcessEnv;
 }
 
+/** A usage window the provider enforces on this account, as the CLI reported it. */
+export interface QuotaWindow {
+  name: string;
+  /** 0..1 */
+  usedPct: number;
+  resetsAt?: string;
+}
+
 export type AdapterEvent =
   | { type: 'session'; id: string }
+  | { type: 'quota'; windows: QuotaWindow[] }
   | { type: 'text'; text: string }
   | { type: 'tool'; id?: string; name: string; input: unknown }
   | { type: 'tool_result'; id?: string; output: string; isError?: boolean }
@@ -68,4 +77,26 @@ export interface Adapter {
 
 export function num(v: unknown): number {
   return typeof v === 'number' && Number.isFinite(v) ? v : 0;
+}
+
+/** Epoch seconds (or milliseconds, or an ISO string) to ISO; undefined when absent. */
+export function isoFromEpoch(v: unknown): string | undefined {
+  if (typeof v === 'string' && v !== '') {
+    const d = new Date(v);
+    return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
+  }
+  if (typeof v !== 'number' || !Number.isFinite(v)) return undefined;
+  const ms = v > 1e12 ? v : v * 1000;
+  return new Date(ms).toISOString();
+}
+
+/** Human name for a rate-limit window given its length in minutes. */
+export function windowName(minutes: number): string {
+  if (minutes === 60) return '1-hour';
+  if (minutes === 300) return '5-hour';
+  if (minutes === 1440) return '1-day';
+  if (minutes === 10080) return '7-day';
+  if (minutes % 1440 === 0) return `${minutes / 1440}-day`;
+  if (minutes % 60 === 0) return `${minutes / 60}-hour`;
+  return `${minutes}-minute`;
 }

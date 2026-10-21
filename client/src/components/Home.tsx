@@ -1,13 +1,20 @@
 import { useState } from 'react';
 import { basename } from '../lib/format';
-import type { ProjectInfo } from '../types';
+import { noneSetUp, type Availability } from '../lib/routing';
+import type { CliHealth, ProjectInfo, Provider } from '../types';
+import { Health } from './Health';
 
 interface Props {
   projects: ProjectInfo[];
   project: ProjectInfo | null;
   openTabs: number;
+  available: Availability;
+  /** Plain-language notes on the routing in force (which CLIs are set up, how tiers are filled). */
+  notes: string[];
+  health: Record<Provider, CliHealth> | null;
   onOpenProject: (path: string) => Promise<void>;
   onNewTab: () => void;
+  onSettings: () => void;
 }
 
 export function Steps() {
@@ -15,7 +22,7 @@ export function Steps() {
     <div className="steps" aria-label="How a tab works">
       <div className="step">
         <b>1 · Vote</b>
-        <span>Three cheap seats rate the task easy, medium or hard.</span>
+        <span>Cheap seats rate the task easy, medium or hard.</span>
       </div>
       <div className="step">
         <b>2 · Route</b>
@@ -29,8 +36,21 @@ export function Steps() {
   );
 }
 
-/** What the main pane shows with no tab selected: get started, or jump back in. */
-export function Home({ projects, project, openTabs, onOpenProject, onNewTab }: Props) {
+function Notes({ notes }: { notes: string[] }) {
+  if (notes.length === 0) return null;
+  return (
+    <div className="notes" aria-label="Routing notes">
+      {notes.map((n) => (
+        <div key={n} className="note-row">
+          {n}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** What the main pane shows with no tab selected: set up a CLI, get started, or jump back in. */
+export function Home({ projects, project, openTabs, available, notes, health, onOpenProject, onNewTab, onSettings }: Props) {
   const [path, setPath] = useState('');
   const [opening, setOpening] = useState(false);
   const open = async (target: string) => {
@@ -43,6 +63,27 @@ export function Home({ projects, project, openTabs, onOpenProject, onNewTab }: P
       setOpening(false);
     }
   };
+
+  if (noneSetUp(available)) {
+    return (
+      <main className="home">
+        <div className="home-inner">
+          <h2>Set up a coding CLI first</h2>
+          <p className="lead">
+            Council drives Claude Code, Codex CLI and Gemini CLI, and none of them is installed and signed in on this machine yet, so there is nothing to route a task to. One is enough: with a single provider the council uses its cheapest model and the tiers climb that provider's own models.
+          </p>
+          <Health health={health} />
+          <p className="muted sm">
+            Install one, sign in, and Council notices within a minute. The same table lives under{' '}
+            <button className="link sm" onClick={onSettings}>
+              Settings › Advanced › CLI health
+            </button>
+            .
+          </p>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="home">
@@ -64,6 +105,7 @@ export function Home({ projects, project, openTabs, onOpenProject, onNewTab }: P
               </span>
             </div>
             <Steps />
+            <Notes notes={notes} />
           </>
         ) : (
           <>
@@ -98,6 +140,7 @@ export function Home({ projects, project, openTabs, onOpenProject, onNewTab }: P
               )}
             </div>
             <Steps />
+            <Notes notes={notes} />
           </>
         )}
       </div>

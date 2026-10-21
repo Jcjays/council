@@ -1,12 +1,14 @@
 import { useEffect, useState, type KeyboardEvent } from 'react';
 import { followUpSelection, selectionChangesWorker } from '../lib/composerMode';
 import { PROVIDER_NAMES } from '../lib/format';
+import { autoLabel, isSetUp, notSetUpTitle, type Availability } from '../lib/routing';
 import { PROVIDERS, type Provider, type Settings, type SubmitMode, type Tab } from '../types';
 import { Glyph } from './Glyph';
 
 interface Props {
   tab: Tab;
   settings: Settings;
+  available: Availability;
   onSubmit: (text: string, mode: SubmitMode, fullAuto: boolean) => Promise<void>;
   onSend: (text: string) => Promise<void>;
   /** A change of worker from the follow-up selector; behaves like the header's Switch worker. */
@@ -30,7 +32,7 @@ function hintFor(tab: Tab): string {
   }
 }
 
-export function Composer({ tab, settings, onSubmit, onSend, onSwitch }: Props) {
+export function Composer({ tab, settings, available, onSubmit, onSend, onSwitch }: Props) {
   const [text, setText] = useState('');
   const [mode, setMode] = useState<'auto' | Provider>('auto');
   const [model, setModel] = useState('');
@@ -78,20 +80,26 @@ export function Composer({ tab, settings, onSubmit, onSend, onSwitch }: Props) {
     </datalist>
   );
 
+  const providerButton = (p: Provider, on: boolean, onClick: () => void, onTitle: string) => {
+    const ok = isSetUp(available, p);
+    return (
+      <button key={p} className={on ? 'on' : ''} onClick={onClick} role="radio" aria-checked={on} disabled={busy || (!ok && !on)} title={ok ? onTitle : notSetUpTitle(p)}>
+        <Glyph provider={p} />
+        {PROVIDER_NAMES[p]}
+        {!ok && <span className="muted xs">not set up</span>}
+      </button>
+    );
+  };
+
   return (
     <div className="composer">
       {drafting && (
         <div className="composer-row">
           <span className="seg" role="radiogroup" aria-label="Routing">
-            <button className={mode === 'auto' ? 'on' : ''} onClick={() => setMode('auto')} role="radio" aria-checked={mode === 'auto'} title="The council votes and routes the task">
-              Auto
+            <button className={mode === 'auto' ? 'on' : ''} onClick={() => setMode('auto')} role="radio" aria-checked={mode === 'auto'} title="Council decides, from the providers that are set up">
+              {autoLabel(available)}
             </button>
-            {PROVIDERS.map((p) => (
-              <button key={p} className={mode === p ? 'on' : ''} onClick={() => setMode(p)} role="radio" aria-checked={mode === p} title={`Skip the vote and send to ${PROVIDER_NAMES[p]}`}>
-                <Glyph provider={p} />
-                {PROVIDER_NAMES[p]}
-              </button>
-            ))}
+            {PROVIDERS.map((p) => providerButton(p, mode === p, () => setMode(p), `Skip the vote and send to ${PROVIDER_NAMES[p]}`))}
           </span>
           {mode !== 'auto' && (
             <>
@@ -109,22 +117,16 @@ export function Composer({ tab, settings, onSubmit, onSend, onSwitch }: Props) {
       {!drafting && canSend && current && (
         <div className="composer-row">
           <span className="seg" role="radiogroup" aria-label="Follow-up worker">
-            {PROVIDERS.map((p) => (
-              <button
-                key={p}
-                className={current.provider === p ? 'on' : ''}
-                role="radio"
-                aria-checked={current.provider === p}
-                disabled={busy}
-                onClick={() => {
+            {PROVIDERS.map((p) =>
+              providerButton(
+                p,
+                current.provider === p,
+                () => {
                   if (selectionChangesWorker(current, p, '')) void onSwitch(p, null);
-                }}
-                title={current.provider === p ? 'The current worker' : `Hand the tab to ${PROVIDER_NAMES[p]}, like Switch worker`}
-              >
-                <Glyph provider={p} />
-                {PROVIDER_NAMES[p]}
-              </button>
-            ))}
+                },
+                current.provider === p ? 'The current worker' : `Hand the tab to ${PROVIDER_NAMES[p]}, like Switch worker`,
+              ),
+            )}
           </span>
           <input className="model" list="followup-models" value={followModel} onChange={(e) => setFollowModel(e.target.value)} placeholder="default model" aria-label="Follow-up model" />
           {modelList(current.provider, 'followup-models')}

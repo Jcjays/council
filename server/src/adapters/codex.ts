@@ -4,7 +4,26 @@ import path from 'node:path';
 import type { JsonObject } from './jsonl.js';
 import { runCli } from './run.js';
 import { resolveCommand } from './spawn.js';
-import { num, ZERO_USAGE, type AdapterEvent, type CliSpec, type RunOptions } from './types.js';
+import { isoFromEpoch, num, windowName, ZERO_USAGE, type AdapterEvent, type CliSpec, type QuotaWindow, type RunOptions } from './types.js';
+
+/** Codex attaches `rate_limits` snapshots ({primary, secondary}) to some events. */
+function quotaFromRateLimits(o: JsonObject): AdapterEvent[] {
+  const limits = o.rate_limits;
+  if (!limits || typeof limits !== 'object') return [];
+  const windows: QuotaWindow[] = [];
+  for (const value of Object.values(limits as Record<string, unknown>)) {
+    if (!value || typeof value !== 'object') continue;
+    const w = value as JsonObject;
+    if (typeof w.used_percent !== 'number') continue;
+    const minutes = num(w.window_minutes);
+    windows.push({
+      name: minutes > 0 ? windowName(minutes) : 'window',
+      usedPct: Math.min(1, Math.max(0, w.used_percent / 100)),
+      resetsAt: isoFromEpoch(w.resets_at),
+    });
+  }
+  return windows.length > 0 ? [{ type: 'quota', windows }] : [];
+}
 
 /**
  * Codex CLI `exec` in JSONL mode. Work runs get a workspace-write sandbox (or no
@@ -81,7 +100,9 @@ function completedItem(item: JsonObject, remember: (text: string) => void): Adap
 /** Stateful per-run parser for `codex exec --json`. */
 export function createCodexParser(): (o: JsonObject) => AdapterEvent[] {
   let lastText: string | undefined;
-  return (o) => {
+  return (o) => [...quotaFromRateLimits(o), ...parseTyped(o)];
+
+  function parseTyped(o: JsonObject): AdapterEvent[] {
     switch (o.type) {
       case 'thread.started':
         return typeof o.thread_id === 'string' ? [{ type: 'session', id: o.thread_id }] : [];
@@ -133,7 +154,7 @@ export function createCodexParser(): (o: JsonObject) => AdapterEvent[] {
       default:
         return [];
     }
-  };
+  }
 }
 
 export async function* runCodex(opts: RunOptions): AsyncGenerator<AdapterEvent> {
