@@ -6,7 +6,7 @@ import { effectiveRouting, type EffectiveRouting } from '../council/effective.js
 import { route } from '../council/routing.js';
 import { repoSnapshot } from '../council/snapshot.js';
 import { budgetState, type BudgetState, type ProviderUsage } from '../ledger/budget.js';
-import { appendEntry, currentPeriod, readEntries, sumPeriod } from '../ledger/ledger.js';
+import { appendEntry, currentPeriod, readEntries, sumPeriod, type LedgerEntry } from '../ledger/ledger.js';
 import { costFor, lookupPrice, type PriceTable } from '../ledger/pricing.js';
 import { diffStat as gitDiffStat } from '../worktrees/git.js';
 import { clipText, clipValue } from './clip.js';
@@ -44,7 +44,12 @@ interface ActiveRun {
   finish: () => void;
 }
 
-const SAVE_DEBOUNCE_MS = 300;
+/**
+ * A streaming worker's transcript is saved at most this often. The live view comes
+ * over the WebSocket; the file only has to be right for a restart, and rewriting a
+ * long transcript several times a second is pure disk churn.
+ */
+const SAVE_DEBOUNCE_MS = 3_000;
 const CLOSE_WAIT_MS = 5_000;
 
 function label(w: WorkerPick): string {
@@ -69,6 +74,8 @@ export class TaskEngine extends EventEmitter {
   private readonly saveTimers = new Map<string, NodeJS.Timeout>();
   private readonly usageByProvider: Partial<Record<Provider, ProviderUsage>> = {};
   private readonly now: () => Date;
+  /** Resolved ledger, loaded on first use. */
+  private entries?: Promise<LedgerEntry[]>;
 
   constructor(private readonly deps: EngineDeps) {
     super();
@@ -101,14 +108,25 @@ export class TaskEngine extends EventEmitter {
         this.addItem(tab, 'system', 'Council was restarted while this tab was running; the worker process is gone.');
         await this.deps.store.save(tab);
       }
+      if (tab.vote && !tab.transcript.some((i) => i.kind === 'vote') && tab.status !== 'awaiting-start') {
+        tab.vote = null;
+        tab.routing = null;
+        await this.deps.store.save(tab);
+      }
       this.tabs.set(tab.id, tab);
     }
     return this.listTabs(projectId);
   }
 
+  /** The ledger, read from disk once and kept in step by `record()`; it only ever grows. */
+  private async ledgerEntries(): Promise<LedgerEntry[]> {
+    this.entries ??= readEntries(this.deps.ledgerFile);
+    return this.entries;
+  }
+
   async budgets(): Promise<Record<Provider, BudgetState>> {
     const s = this.deps.settings();
-    const entries = await readEntries(this.deps.ledgerFile);
+    const entries = await this.ledgerEntries();
     const { start, end } = currentPeriod(this.now(), s.resetDay);
     const sums = sumPeriod(entries, start, end);
     return Object.fromEntries(
@@ -227,6 +245,26 @@ export class TaskEngine extends EventEmitter {
     return tab;
   }
 
+  async clearContext(tabId: string): Promise<Tab> {
+    const tab = this.must(tabId);
+    this.require(tab, ['idle', 'failed']);
+    tab.status = transition(tab.status, 'clear-context');
+    tab.worker = null;
+    tab.previousWorkers = [];
+    tab.tier = null;
+    tab.vote = null;
+    tab.routing = null;
+    const item: TranscriptItem = {
+      id: newId(),
+      ts: this.now().toISOString(),
+      kind: 'system',
+      text: 'Context cleared. Chat transcript reset; describe a task below to have the council vote and route it again.',
+    };
+    tab.transcript = [item];
+    await this.touch(tab);
+    return tab;
+  }
+
   // ---- internals -----------------------------------------------------------
 
   private must(tabId: string): Tab {
@@ -315,7 +353,7 @@ export class TaskEngine extends EventEmitter {
 
   private async record(tab: Tab, provider: Provider, model: string | null, purpose: 'vote' | 'work' | 'summarize', ev: ResultEvent): Promise<number> {
     const costUsd = ev.costUsd ?? costFor(provider, model, ev.usage, this.deps.pricing());
-    await appendEntry(this.deps.ledgerFile, {
+    const entry: LedgerEntry = {
       ts: this.now().toISOString(),
       provider,
       model,
@@ -324,10 +362,31 @@ export class TaskEngine extends EventEmitter {
       projectId: tab.projectId,
       usage: ev.usage,
       costUsd,
-    });
+    };
+    (await this.ledgerEntries()).push(entry);
+    await appendEntry(this.deps.ledgerFile, entry);
     tab.costUsd += costUsd;
     this.emit('ledger', { tabId: tab.id, provider, costUsd });
     return costUsd;
+  }
+
+  /**
+   * Registers a phase that is not a worker run (a vote, a hand-off summary) so
+   * `close()` aborts its CLIs instead of leaving them to finish and bill.
+   */
+  private async tracked<T>(tab: Tab, fn: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    let finish: () => void = () => {};
+    const done = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const run: ActiveRun = { ac: new AbortController(), done, finish };
+    this.runs.set(tab.id, run);
+    try {
+      return await fn(run.ac.signal);
+    } finally {
+      if (this.runs.get(tab.id) === run) this.runs.delete(tab.id);
+      run.finish();
+    }
   }
 
   private async runVote(tab: Tab, task: string): Promise<void> {
@@ -335,20 +394,23 @@ export class TaskEngine extends EventEmitter {
     const eff = this.routing(tab.projectId);
     const cwd = tab.projectRoot;
     const snapshot = await (this.deps.snapshot ?? repoSnapshot)(cwd);
-    const result = await runCouncil({
-      seats: eff.seats,
-      adapters: this.deps.adapters,
-      task,
-      cwd,
-      snapshot,
-      pricing: this.deps.pricing(),
-      timeoutMs: s.seatTimeoutMs,
-      costCeiling: s.voteCostCeiling,
-      onResult: async (provider, model, ev) => {
-        await this.record(tab, provider, model, 'vote', ev);
-      },
-      onQuota: (provider, windows) => this.noteUsage(provider, windows),
-    });
+    const result = await this.tracked(tab, (signal) =>
+      runCouncil({
+        seats: eff.seats,
+        adapters: this.deps.adapters,
+        task,
+        cwd,
+        snapshot,
+        pricing: this.deps.pricing(),
+        timeoutMs: s.seatTimeoutMs,
+        costCeiling: s.voteCostCeiling,
+        signal,
+        onResult: async (provider, model, ev) => {
+          await this.record(tab, provider, model, 'vote', ev);
+        },
+        onQuota: (provider, windows) => this.noteUsage(provider, windows),
+      }),
+    );
     if (isClosed(tab)) return;
 
     tab.vote = result;
@@ -545,6 +607,10 @@ export class TaskEngine extends EventEmitter {
     const s = this.settingsFor(tab);
     const seat = this.cheapestSeat(s.seats.filter((seat) => !this.unavailable().includes(seat.provider)));
     if (!seat) return mechanicalSummary(tab.transcript);
+    return this.tracked(tab, (cancel) => this.summarizeWith(tab, seat, s, cancel));
+  }
+
+  private async summarizeWith(tab: Tab, seat: Seat, s: Settings, cancel: AbortSignal): Promise<string> {
     try {
       let text = '';
       const events = this.deps.adapters[seat.provider].run({
@@ -554,7 +620,7 @@ export class TaskEngine extends EventEmitter {
         purpose: 'summarize',
         fullAuto: false,
         allowedCommands: [],
-        signal: AbortSignal.timeout(s.seatTimeoutMs),
+        signal: AbortSignal.any([cancel, AbortSignal.timeout(s.seatTimeoutMs)]),
       });
       for await (const ev of events) {
         if (ev.type === 'text') text += ev.text;

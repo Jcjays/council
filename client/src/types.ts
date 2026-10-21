@@ -91,6 +91,29 @@ export interface BudgetState {
   pct: number;
   warning: boolean;
   exhausted: boolean;
+  tokens?: {
+    input: number;
+    output: number;
+    cached: number;
+    total: number;
+  };
+}
+
+export interface PlanInfo {
+  name: string;
+  path: string;
+  title: string;
+}
+
+export interface SkillInfo {
+  name: string;
+  source: string;
+}
+
+export interface ModelLimit {
+  model: string;
+  contextWindow: number;
+  maxOutput: number;
 }
 
 export interface CliHealth {
@@ -99,14 +122,33 @@ export interface CliHealth {
   authed: boolean;
   authSource?: 'api-key' | 'login' | 'none' | 'unknown';
   error?: string;
+  models?: string[];
+  modelLimits?: ModelLimit[];
+  plan?: string;
+  rateLimitTier?: string;
+  recommendedBudget?: number;
 }
 
-export interface ModelPrice {
-  inputPerM: number;
-  cachedInputPerM: number;
-  outputPerM: number;
+export interface DiscoveredProject {
+  root: string;
+  name: string;
+  defaultBranch: string | null;
+  isCurrent: boolean;
 }
-export type PriceTable = Record<string, ModelPrice>;
+
+export interface BrowseDirectoryEntry {
+  name: string;
+  path: string;
+  isGitRepo: boolean;
+}
+
+export interface BrowseResult {
+  current: string;
+  parent: string | null;
+  isGitRepo: boolean;
+  defaultBranch: string | null;
+  directories: BrowseDirectoryEntry[];
+}
 
 export interface Settings {
   budgets: Record<Provider, number>;

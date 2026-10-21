@@ -40,6 +40,8 @@ export interface CouncilArgs {
   pricing: PriceTable;
   timeoutMs?: number;
   costCeiling?: number;
+  /** Cancels every seat, e.g. because the tab was closed mid-vote. */
+  signal?: AbortSignal;
   env?: NodeJS.ProcessEnv;
 }
 
@@ -69,6 +71,7 @@ async function runSeat(seat: Seat, a: CouncilArgs, prompt: string): Promise<Seat
   const ceiling = a.costCeiling ?? DEFAULT_VOTE_COST_CEILING;
   const started = Date.now();
   const ac = new AbortController();
+  const signal = a.signal ? AbortSignal.any([ac.signal, a.signal]) : ac.signal;
   const timer = setTimeout(() => ac.abort(), timeoutMs);
 
   let streamed = '';
@@ -84,11 +87,11 @@ async function runSeat(seat: Seat, a: CouncilArgs, prompt: string): Promise<Seat
       purpose: 'vote',
       fullAuto: false,
       allowedCommands: [],
-      signal: ac.signal,
+      signal,
       jsonSchema: VOTE_JSON_SCHEMA,
       env: a.env,
     });
-    for await (const ev of untilAbort(events, ac.signal)) {
+    for await (const ev of untilAbort(events, signal)) {
       if (ev.type === 'text') streamed += ev.text;
       else if (ev.type === 'quota') a.onQuota?.(seat.provider, ev.windows);
       else if (ev.type === 'error') error = ev.message;
@@ -99,6 +102,7 @@ async function runSeat(seat: Seat, a: CouncilArgs, prompt: string): Promise<Seat
       }
     }
     if (ac.signal.aborted) error = `timed out after ${timeoutMs} ms`;
+    else if (a.signal?.aborted) error = 'the vote was cancelled';
   } catch (err) {
     error = err instanceof Error ? err.message : String(err);
   } finally {

@@ -1,6 +1,6 @@
 import type http from 'node:http';
 import { WebSocket, WebSocketServer } from 'ws';
-import { isAllowedOrigin } from './origin.js';
+import { isAllowedHost, isAllowedOrigin } from './origin.js';
 import type { TaskEngine } from './tasks/engine.js';
 
 export type WsMessage =
@@ -19,7 +19,8 @@ export function attachWebSocket(server: http.Server, engine: TaskEngine): WebSoc
   const wss = new WebSocketServer({
     server,
     path: '/ws',
-    verifyClient: (info: { origin: string | undefined }) => isAllowedOrigin(info.origin || undefined),
+    verifyClient: (info: { origin: string | undefined; req: http.IncomingMessage }) =>
+      isAllowedOrigin(info.origin || undefined) && isAllowedHost(info.req.headers.host),
   });
   const pending = new Map<WebSocket, string[]>();
 

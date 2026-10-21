@@ -11,7 +11,7 @@ Everything runs on your machine and talks to the CLIs you already have installed
 1. **Describe** the task in a new tab. Pick *Auto* to let the council route it, or pick a specific provider and model yourself.
 2. **Vote.** Each council seat (by default Gemini Flash, a small Codex model and Claude Haiku) is asked, without tools, to classify the task as easy, medium or hard. Majority wins; a three-way split lands on medium; a two-way tie goes to the higher tier. The vote card shows every seat's answer, confidence, reason and cost.
 3. **Start.** The task is routed to the worker for that tier. If that provider's budget is exhausted, or its CLI is missing or not signed in, routing shifts to the nearest tier and says so. You can override the pick before starting, or turn on *auto-start* in Settings.
-4. **Work.** The worker runs in your project checkout. Its output, tool calls and cost stream into the tab. Follow-up messages resume the same CLI session. Nothing is committed; the changes sit in your working copy like edits you made yourself. Two tabs editing the same files at the same time can collide, so give parallel tabs separate areas of the code.
+4. **Work.** The worker runs in your project checkout. Its edits are auto-approved, but shell commands are held to the allow-list and Codex keeps its sandbox; the composer's *Full auto* button lifts all of that for the tab, and *Always full auto* does it for every task in the project. Its output, tool calls and cost stream into the tab. Follow-up messages resume the same CLI session. Nothing is committed; the changes sit in your working copy like edits you made yourself. Two tabs editing the same files at the same time can collide, so give parallel tabs separate areas of the code.
 5. **Escalate or switch.** If the worker fails, the task is handed one tier up with a short summary of what was tried and the uncommitted diff so far (once, automatically; after that it is your call). *Switch worker* does the same to any provider you choose; switching back resumes the earlier session.
 6. **Review and close.** Look at the changes in your editor or `git diff`, keep or discard them, and close the tab. Closing stops a running worker and leaves the checkout as it is.
 
@@ -48,13 +48,13 @@ Each provider has a monthly limit (defaults: Claude $40, Codex $30, Gemini $30, 
 
 Plan usage is detected automatically where the CLI reports it: Claude Code streams the account's five-hour and seven-day windows during every run, and Codex attaches rate-limit snapshots to its events. Those windows appear under the provider's budget bar with the time to reset, straight from the CLI, no setup needed. Plain API keys expose no remaining-credit figure, so the dollar limits above stay a one-time entry; the spend against them is always tracked automatically.
 
-Claude Code reports its own cost per run and that number is used as is. If you run Claude on a subscription rather than an API key, it is the list-price equivalent, not money leaving your account. Codex and Gemini report tokens only, so Council multiplies them by the price table in Settings. The seeded prices come from public price pages and are meant to be checked and edited; prices are per million tokens and a row can be an exact model name, a prefix, or `<provider>:default`.
+Claude Code reports its own cost per run and that number is used as is. If you run Claude on a subscription rather than an API key, it is the list-price equivalent, not money leaving your account. Codex and Gemini report tokens only, so Council multiplies them by the price table in `~/.council/pricing.json`. The seeded prices come from public price pages and are meant to be checked and edited there; prices are per million tokens and a row can be an exact model name, a prefix, or `<provider>:default`.
 
 ## Settings worth knowing
 
 - **Council seats** – any number of seats from 1 to 5, each any provider and model. Keep them cheap: every task pays for every seat.
 - **Who does what** – the worker for each tier. Defaults: easy → Gemini `flash`, medium → Codex default model, hard → Claude Sonnet.
-- **Allowed commands** – Claude Code `--allowedTools` patterns for workers. Gemini workers auto-approve edits only; Codex workers run in a workspace-write sandbox. The *Full auto* toggle on a tab lifts all of these for that tab.
+- **Allowed commands** – the `--allowedTools` patterns a restricted Claude worker may run. Edited in the composer, next to the permission buttons, and saved for every project.
 - **Auto-start / auto-escalate / stall minutes** – whether to skip the pause after a vote, whether a failed worker escalates once by itself, and how long silence counts as a stall.
 
 ## Known limits

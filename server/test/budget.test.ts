@@ -2,7 +2,7 @@ import { expect, test } from 'vitest';
 import { budgetState } from '../src/ledger/budget.js';
 
 test('budgetState computes pct, warns at 80% and marks exhausted at 100%', () => {
-  expect(budgetState('gemini', { spent: 15, routingSpent: 1 }, 30)).toEqual({
+  expect(budgetState('gemini', { spent: 15, routingSpent: 1, inputTokens: 100, cachedTokens: 0, outputTokens: 50, totalTokens: 150 }, 30)).toEqual({
     provider: 'gemini',
     spent: 15,
     routingSpent: 1,
@@ -10,6 +10,7 @@ test('budgetState computes pct, warns at 80% and marks exhausted at 100%', () =>
     pct: 0.5,
     warning: false,
     exhausted: false,
+    tokens: { input: 100, cached: 0, output: 50, total: 150 },
   });
   expect(budgetState('gemini', { spent: 24, routingSpent: 0 }, 30).warning).toBe(true);
   expect(budgetState('gemini', { spent: 30, routingSpent: 0 }, 30)).toMatchObject({ exhausted: true, warning: true, pct: 1 });

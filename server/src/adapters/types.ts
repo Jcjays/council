@@ -6,6 +6,17 @@ export const TIER_ORDER: readonly Tier[] = ['easy', 'medium', 'hard'];
 
 export type Purpose = 'vote' | 'work' | 'summarize';
 
+/**
+ * Each provider's models from cheapest to dearest. The tier ladder climbs this
+ * list when a provider has to cover more than one tier, and it seeds both the
+ * settings defaults and the fallback for model detection.
+ */
+export const MODEL_LADDERS: Record<Provider, string[]> = {
+  claude: ['claude-haiku-5-5', 'claude-sonnet-5-5', 'claude-opus-5-5', 'claude-fable-5-1'],
+  codex: ['gpt-5.1-codex-mini', 'gpt-5.1-codex', 'gpt-5.5'],
+  gemini: ['flash-lite', 'flash', 'pro'],
+};
+
 export interface Usage {
   inputTokens: number;
   cachedInputTokens: number;
@@ -54,12 +65,23 @@ export type ResultEvent = Extract<AdapterEvent, { type: 'result' }>;
 
 export type AuthSource = 'api-key' | 'login' | 'none' | 'unknown';
 
+export interface ModelLimit {
+  model: string;
+  contextWindow: number;
+  maxOutput: number;
+}
+
 export interface CliHealth {
   installed: boolean;
   version?: string;
   authed: boolean;
   authSource?: AuthSource;
   error?: string;
+  models?: string[];
+  modelLimits?: ModelLimit[];
+  plan?: string;
+  rateLimitTier?: string;
+  recommendedBudget?: number;
 }
 
 /** A fully built command line: what to run, with what args, and what to feed on stdin. */

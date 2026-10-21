@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { detectAuth, probeVersion } from '../src/adapters/health.js';
+import { DEFAULT_KNOWN_MODELS, detectAuth, detectModels, detectPlan, probeVersion } from '../src/adapters/health.js';
 import { checkAll } from '../src/adapters/index.js';
 import type { Adapter, CliHealth, Provider } from '../src/adapters/types.js';
 
@@ -53,4 +53,90 @@ test('detectAuth reports none when nothing is found, except Claude on macOS (key
   expect(detectAuth('claude', {}, () => false, 'win32')).toEqual({ authed: false, source: 'none' });
   expect(detectAuth('gemini', {}, () => false, 'darwin')).toEqual({ authed: false, source: 'none' });
   expect(detectAuth('claude', {}, () => false, 'darwin')).toEqual({ authed: true, source: 'unknown' });
+});
+
+test('detectModels detects codex models from models_cache.json and omits hidden ones', () => {
+  const fakeReader = (p: string) => {
+    if (p.endsWith('models_cache.json')) {
+      return JSON.stringify({
+        models: [
+          { slug: 'custom-codex-1', visibility: 'list' },
+          { slug: 'hidden-model', visibility: 'hide' },
+          { slug: 'custom-codex-2', visibility: 'list' },
+        ],
+      });
+    }
+    return null;
+  };
+  const models = detectModels('codex', '/fake/home', fakeReader);
+  expect(models).toContain('custom-codex-1');
+  expect(models).toContain('custom-codex-2');
+  expect(models).not.toContain('hidden-model');
+  expect(models).toEqual(['custom-codex-1', 'custom-codex-2']);
+});
+
+test('detectModels detects claude model from settings.json', () => {
+  const fakeReader = (p: string) => {
+    if (p.endsWith('settings.json')) {
+      return JSON.stringify({
+        model: 'claude-custom-1',
+        modelSettings: {
+          'claude-custom-2': { effortLevel: 'high' },
+        },
+      });
+    }
+    return null;
+  };
+  const models = detectModels('claude', '/fake/home', fakeReader);
+  expect(models).toContain('claude-custom-1');
+  expect(models).toContain('claude-custom-2');
+  expect(models).toEqual(expect.arrayContaining(DEFAULT_KNOWN_MODELS.claude));
+});
+
+test('detectModels detects gemini model from settings.json', () => {
+  const fakeReader = (p: string) => {
+    if (p.endsWith('settings.json')) {
+      return JSON.stringify({
+        model: { name: 'gemini-custom-pro' },
+      });
+    }
+    return null;
+  };
+  const models = detectModels('gemini', '/fake/home', fakeReader);
+  expect(models).toContain('gemini-custom-pro');
+  expect(models).toEqual(expect.arrayContaining(DEFAULT_KNOWN_MODELS.gemini));
+});
+
+test('detectModels falls back to defaults when config files are absent or invalid', () => {
+  const emptyReader = () => null;
+  expect(detectModels('codex', '/fake/home', emptyReader)).toEqual(DEFAULT_KNOWN_MODELS.codex);
+  expect(detectModels('claude', '/fake/home', emptyReader)).toEqual(DEFAULT_KNOWN_MODELS.claude);
+  expect(detectModels('gemini', '/fake/home', emptyReader)).toEqual(DEFAULT_KNOWN_MODELS.gemini);
+
+  const brokenReader = () => 'not json';
+  expect(detectModels('codex', '/fake/home', brokenReader)).toEqual(DEFAULT_KNOWN_MODELS.codex);
+});
+
+test('detectPlan detects subscription tiers and recommends appropriate budget limits', () => {
+  const fakeReader = (p: string) => {
+    if (p.endsWith('.credentials.json')) {
+      return JSON.stringify({ claudeAiOauth: { subscriptionType: 'enterprise' } });
+    }
+    if (p.endsWith('auth.json')) {
+      return JSON.stringify({ auth_mode: 'chatgpt' });
+    }
+    return null;
+  };
+
+  const claudePlan = detectPlan('claude', '/fake/home', fakeReader);
+  expect(claudePlan.plan).toBe('Enterprise');
+  expect(claudePlan.recommendedBudget).toBe(100);
+
+  const codexPlan = detectPlan('codex', '/fake/home', fakeReader);
+  expect(codexPlan.plan).toBe('ChatGPT Subscription');
+  expect(codexPlan.recommendedBudget).toBe(50);
+
+  const geminiApiKeyPlan = detectPlan('gemini', '/fake/home', () => null, { GEMINI_API_KEY: 'test-key' });
+  expect(geminiApiKeyPlan.plan).toBe('API Key');
+  expect(geminiApiKeyPlan.recommendedBudget).toBe(40);
 });

@@ -69,8 +69,8 @@ test('sumPeriod totals per provider, splits routing spend, and respects the wind
     entry({ provider: 'codex', purpose: 'work', costUsd: 4, ts: new Date(2026, 10, 1).toISOString() }),
   ];
   expect(sumPeriod(entries, start, end)).toEqual({
-    gemini: { spent: 1.25, routingSpent: 0.25 },
-    claude: { spent: 0.5, routingSpent: 0.5 },
-    codex: { spent: 0, routingSpent: 0 },
+    gemini: { spent: 1.25, routingSpent: 0.25, inputTokens: 20, cachedTokens: 0, outputTokens: 10, totalTokens: 30 },
+    claude: { spent: 0.5, routingSpent: 0.5, inputTokens: 10, cachedTokens: 0, outputTokens: 5, totalTokens: 15 },
+    codex: { spent: 0, routingSpent: 0, inputTokens: 0, cachedTokens: 0, outputTokens: 0, totalTokens: 0 },
   });
 });

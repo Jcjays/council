@@ -24,9 +24,10 @@ interface Props {
   details: boolean;
   onToggleDetails: () => void;
   onError: (message: string) => void;
+  onTabUpdate?: (tab: Tab) => void;
 }
 
-export function TabView({ tab, settings, available, stallSeq, details, onToggleDetails, onError }: Props) {
+export function TabView({ tab, settings, available, stallSeq, details, onToggleDetails, onError, onTabUpdate }: Props) {
   const [switching, setSwitching] = useState(false);
   const [switchProvider, setSwitchProvider] = useState<Provider>(() => firstSetUp(available, 'claude'));
   const [switchModel, setSwitchModel] = useState('');
@@ -38,10 +39,13 @@ export function TabView({ tab, settings, available, stallSeq, details, onToggleD
   const last = tab.transcript[tab.transcript.length - 1];
   const { pinned, jump } = useStickToBottom(streamRef, `${tab.transcript.length}:${last?.text?.length ?? 0}:${last?.tool?.output?.length ?? 0}`);
 
-  const act = async (fn: () => Promise<unknown>) => {
+  const act = async (fn: () => Promise<unknown>): Promise<void> => {
     setBusy(true);
     try {
-      await fn();
+      const res = await fn();
+      if (res && typeof res === 'object' && 'id' in res && onTabUpdate) {
+        onTabUpdate(res as unknown as Tab);
+      }
     } catch (err) {
       onError((err as Error).message);
     } finally {
@@ -91,9 +95,19 @@ export function TabView({ tab, settings, available, stallSeq, details, onToggleD
               </button>
             )}
             {settled && (
-              <button className="quiet" disabled={busy} onClick={() => setSwitching((s) => !s)} aria-expanded={switching}>
-                Switch worker
-              </button>
+              <>
+                <button
+                  className="quiet"
+                  disabled={busy}
+                  onClick={() => void act(() => api.clearContext(tab.id))}
+                  title="Clear session context and start fresh on the next message without prior history"
+                >
+                  🧹 Clear context
+                </button>
+                <button className="quiet" disabled={busy} onClick={() => setSwitching((s) => !s)} aria-expanded={switching}>
+                  Switch worker
+                </button>
+              </>
             )}
             {tab.status !== 'closed' && (
               <button disabled={busy} className="quiet danger" onClick={() => setClosing((c) => !c)} aria-expanded={closing}>
@@ -111,12 +125,14 @@ export function TabView({ tab, settings, available, stallSeq, details, onToggleD
             <div className="card inline-form">
               <span>Hand this tab to</span>
               <ProviderSelect value={switchProvider} onChange={setSwitchProvider} available={available} ariaLabel="Switch provider" />
-              <input list="switch-models" value={switchModel} onChange={(e) => setSwitchModel(e.target.value)} placeholder="default model" aria-label="Switch model" />
-              <datalist id="switch-models">
-                {settings.models[switchProvider].map((m) => (
-                  <option key={m} value={m} />
+              <select value={switchModel} onChange={(e) => setSwitchModel(e.target.value)} aria-label="Switch model">
+                <option value="">default model</option>
+                {settings.models[switchProvider]?.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
                 ))}
-              </datalist>
+              </select>
               <button
                 className="primary"
                 disabled={busy}
@@ -189,7 +205,11 @@ export function TabView({ tab, settings, available, stallSeq, details, onToggleD
             items={tab.transcript}
             provider={tab.worker?.provider ?? null}
             pathBase={tab.projectRoot}
-            voteCard={tab.vote ? <VoteCard tab={tab} settings={settings} available={available} onStart={(pick) => act(() => api.start(tab.id, pick))} /> : undefined}
+            voteCard={
+              ((tab.vote && (tab.transcript.some((i) => i.kind === 'vote') || tab.status === 'awaiting-start')) || tab.status === 'voting') ? (
+                <VoteCard tab={tab} settings={settings} available={available} onStart={(pick) => act(() => api.start(tab.id, pick))} />
+              ) : undefined
+            }
           />
 
           {!pinned && (

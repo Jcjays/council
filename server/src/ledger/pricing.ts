@@ -26,7 +26,7 @@ const GPT_55: ModelPrice = { inputPerM: 5, cachedInputPerM: 0.5, outputPerM: 30 
 /**
  * Seeded from public price pages in October 2026 (third-party aggregators; verify
  * against the vendors). Claude Code reports its own cost, so Anthropic models need
- * no entry unless that report is missing. Edit in Settings or `~/.council/pricing.json`.
+ * no entry unless that report is missing. Edit `~/.council/pricing.json`.
  */
 export const DEFAULT_PRICING: PriceTable = {
   // Google

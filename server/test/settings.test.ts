@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { expect, test } from 'vitest';
-import { DEFAULT_SETTINGS, effectiveSettings, loadSettings, saveSettings } from '../src/config/settings.js';
+import { DEFAULT_SETTINGS, effectiveSettings, loadSettings, mergeSettings, saveSettings } from '../src/config/settings.js';
 
 function tmpFile(): string {
   return path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'council-settings-')), 'settings.json');
@@ -61,4 +61,35 @@ test('effectiveSettings applies a project override and leaves everything else', 
   expect(e.allowedCommands).toEqual(['Bash(x)']);
   expect(e.budgets).toEqual(s.budgets);
   expect(effectiveSettings(s, 'other')).toEqual(s);
+});
+
+test('values of the wrong type are dropped instead of stored', () => {
+  const s = mergeSettings(DEFAULT_SETTINGS, {
+    stallMinutes: 'soon',
+    seatTimeoutMs: null,
+    autoStart: 'yes',
+    seats: 3,
+    allowedCommands: ['Bash(ls*)', 7],
+    budgets: { claude: 'lots', codex: 12 },
+    tierMap: { easy: { provider: 'nope', model: 'x' } },
+  });
+  expect(s.stallMinutes).toBe(DEFAULT_SETTINGS.stallMinutes);
+  expect(s.seatTimeoutMs).toBe(DEFAULT_SETTINGS.seatTimeoutMs);
+  expect(s.autoStart).toBe(DEFAULT_SETTINGS.autoStart);
+  expect(s.seats).toEqual(DEFAULT_SETTINGS.seats);
+  expect(s.allowedCommands).toEqual(DEFAULT_SETTINGS.allowedCommands);
+  expect(s.budgets).toEqual({ claude: 40, codex: 12, gemini: 30 });
+  expect(s.tierMap.easy).toEqual(DEFAULT_SETTINGS.tierMap.easy);
+});
+
+test('numbers out of range are clamped, and seats are capped at five', () => {
+  const s = mergeSettings(DEFAULT_SETTINGS, {
+    warnPct: 4,
+    resetDay: 99,
+    seats: Array.from({ length: 8 }, () => ({ provider: 'gemini' })),
+  });
+  expect(s.warnPct).toBe(1);
+  expect(s.resetDay).toBe(31);
+  expect(s.seats).toHaveLength(5);
+  expect(s.seats[0]).toEqual({ provider: 'gemini', model: null });
 });

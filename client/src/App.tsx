@@ -264,7 +264,17 @@ export function App() {
         {view === 'settings' && settings ? (
           <Settings settings={settings} onSaved={setSettings} health={health} onError={onError} />
         ) : selected && settings ? (
-          <TabView key={selected.id} tab={selected} settings={settings} available={available} stallSeq={stallSeq[selected.id] ?? 0} details={details} onToggleDetails={toggleDetails} onError={onError} />
+          <TabView
+            key={selected.id}
+            tab={selected}
+            settings={settings}
+            available={available}
+            stallSeq={stallSeq[selected.id] ?? 0}
+            details={details}
+            onToggleDetails={toggleDetails}
+            onError={onError}
+            onTabUpdate={(updated) => setTabs((prev) => ({ ...prev, [updated.id]: updated }))}
+          />
         ) : (
           <Home projects={projects} project={project} openTabs={openTabs.length} available={available} notes={routing?.notes ?? []} health={health} onOpenProject={openFromUi} onNewTab={() => void newTab()} onSettings={() => setView('settings')} />
         )}

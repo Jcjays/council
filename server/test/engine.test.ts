@@ -216,6 +216,33 @@ test('changing only the model keeps the session and takes effect on the next mes
   expect(calls[1]).toMatchObject({ model: 'pro', resumeId: 'gemini-session' });
 });
 
+test('clearContext resets worker session and resets chat transcript to a single system notice', async () => {
+  const { engine, adapters } = setup({ settings: { autoStart: true } });
+  const tab = await engine.createTab('C:/proj', 't');
+  await engine.submit(tab.id, 'start', { kind: 'auto' });
+  await waitFor(engine, tab.id, ['idle']);
+  expect(tab.transcript.length).toBeGreaterThan(1);
+  expect(tab.worker?.sessionId).toBe('gemini-session');
+  expect(tab.vote).not.toBeNull();
+
+  const cleared = await engine.clearContext(tab.id);
+  expect(cleared.status).toBe('drafting');
+  expect(cleared.worker).toBeNull();
+  expect(cleared.tier).toBeNull();
+  expect(cleared.transcript.length).toBe(1);
+  expect(cleared.transcript[0]?.kind).toBe('system');
+  expect(cleared.transcript[0]?.text).toContain('Context cleared');
+  expect(cleared.vote).toBeNull();
+  expect(cleared.routing).toBeNull();
+
+  // Next message in auto mode triggers council vote again
+  await engine.submit(tab.id, 'brand new task', { kind: 'auto' });
+  await waitFor(engine, tab.id, ['idle']);
+  expect(tab.vote).not.toBeNull();
+  const voteCalls = adapters.gemini.calls.filter((c) => c.purpose === 'vote');
+  expect(voteCalls.length).toBe(2);
+});
+
 test('closing a running tab aborts the worker and applies no further events', async () => {
   const slow = new FakeAdapter('gemini', (opts: RunOptions) =>
     opts.purpose === 'vote' ? { events: voteEvents('easy') } : { events: workEvents(), delayMs: 150 },
@@ -233,6 +260,28 @@ test('closing a running tab aborts the worker and applies no further events', as
   await new Promise((r) => setTimeout(r, 500));
   expect(engine.getTab(tab.id)?.transcript.length).toBe(count);
   expect(engine.getTab(tab.id)?.status).toBe('closed');
+});
+
+test('closing a tab mid-vote stops the seats instead of letting them finish and bill', async () => {
+  const slowVote = (provider: 'claude' | 'codex' | 'gemini') =>
+    new FakeAdapter(provider, (opts: RunOptions) =>
+      opts.purpose === 'vote' ? { events: voteEvents('easy'), delayMs: 2_000 } : { events: workEvents() },
+    );
+  const seats = { gemini: slowVote('gemini'), codex: slowVote('codex'), claude: slowVote('claude') };
+  const { engine, ledgerFile } = setup({ adapters: seats });
+  const tab = await engine.createTab('C:/proj', 't');
+  await engine.submit(tab.id, 'go', { kind: 'auto' });
+  await waitFor(engine, tab.id, ['voting']);
+  for (let i = 0; i < 50 && !seats.gemini.calls.some((c) => c.purpose === 'vote'); i++) await new Promise((r) => setTimeout(r, 20));
+
+  const started = Date.now();
+  const closed = await engine.close(tab.id);
+  expect(closed.status).toBe('closed');
+  expect(Date.now() - started).toBeLessThan(1_500);
+  for (const seat of Object.values(seats)) {
+    expect(seat.calls.find((c) => c.purpose === 'vote')?.signal?.aborted).toBe(true);
+  }
+  expect(await readEntries(ledgerFile)).toEqual([]);
 });
 
 test('workers run in the project checkout itself; tabs carry no worktree', async () => {

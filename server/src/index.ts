@@ -2,8 +2,9 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { adapters, checkAll } from './adapters/index.js';
-import type { CliHealth, Provider } from './adapters/types.js';
+import { MODEL_LADDERS, PROVIDERS, type CliHealth, type Provider } from './adapters/types.js';
 import { paths } from './config/paths.js';
+import { detectedModels } from './config/detect.js';
 import { SettingsStore } from './config/settings.js';
 import { createServer } from './http.js';
 import { PricingStore } from './ledger/pricing.js';
@@ -63,7 +64,20 @@ async function main(): Promise<void> {
       console.warn(`[council] could not load tabs for ${root}: ${(err as Error).message}`);
     }
   }
-  void health.get();
+  // Warms the health cache, which routing reads. On a first run, where the model
+  // lists are still the factory ladder, they are filled in from the CLIs that are
+  // set up. Nothing else is written at startup: budgets and model choices belong to
+  // the developer, and Settings has an explicit auto-detect button for each.
+  void health
+    .get()
+    .then(async (h) => {
+      const current = settings.get();
+      const untouched = PROVIDERS.every(
+        (p) => (current.models[p] ?? []).join('\n') === (MODEL_LADDERS[p] ?? []).join('\n'),
+      );
+      if (untouched) await settings.update(detectedModels(current, h));
+    })
+    .catch(() => {});
 
   const here = path.dirname(fileURLToPath(import.meta.url));
   const clientDist = path.resolve(here, '..', '..', 'client', 'dist');
