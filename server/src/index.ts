@@ -64,6 +64,9 @@ async function main(): Promise<void> {
     }
   }
   void health.get();
+  void pricing.refreshIfStale().then((s) => {
+    if (s?.lastError) console.warn(`[council] price refresh: ${s.lastError}`);
+  });
 
   const here = path.dirname(fileURLToPath(import.meta.url));
   const clientDist = path.resolve(here, '..', '..', 'client', 'dist');

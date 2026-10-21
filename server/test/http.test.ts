@@ -20,7 +20,11 @@ beforeAll(async () => {
   server = createServer({
     engine: fixture.engine,
     settings: new SettingsStore(path.join(fixture.home, 'settings.json'), fixture.settings),
-    pricing: new PricingStore(path.join(fixture.home, 'pricing.json')),
+    pricing: new PricingStore(path.join(fixture.home, 'pricing.json'), undefined, async () => ({
+      table: { 'claude-haiku-5-5': { inputPerM: 0.1, cachedInputPerM: 0.01, outputPerM: 0.5 } },
+      source: 'LiteLLM',
+      errors: [],
+    })),
     health: async () => ({
       claude: { installed: true, version: '2.1.302', authed: true },
       codex: { installed: false, authed: false, error: 'not found' },
@@ -72,13 +76,24 @@ test('GET /api/settings returns the settings and PUT merges and persists a chang
   await api('PUT', '/api/settings', { autoStart: false });
 });
 
-test('GET /api/pricing returns the table and PUT replaces an entry', async () => {
+test('GET /api/pricing reports the table with its source; PUT sets the manual overrides', async () => {
   const r = await api('GET', '/api/pricing');
-  expect(r.json.flash).toBeDefined();
+  expect(r.json.table.flash).toBeDefined();
+  expect(r.json).toMatchObject({ source: 'built-in defaults', fetchedAt: null, overrides: {} });
   const put = await api('PUT', '/api/pricing', { flash: { inputPerM: 1, cachedInputPerM: 0.1, outputPerM: 2 } });
   expect(put.status).toBe(200);
-  expect(put.json.flash).toEqual({ inputPerM: 1, cachedInputPerM: 0.1, outputPerM: 2 });
-  expect(put.json.pro).toBeDefined();
+  expect(put.json.overrides).toEqual({ flash: { inputPerM: 1, cachedInputPerM: 0.1, outputPerM: 2 } });
+  expect(put.json.table.flash).toEqual({ inputPerM: 1, cachedInputPerM: 0.1, outputPerM: 2 });
+  expect(put.json.table.pro).toBeDefined();
+  await api('PUT', '/api/pricing', {});
+});
+
+test('POST /api/pricing/refresh fetches prices and says where they came from', async () => {
+  const r = await api('POST', '/api/pricing/refresh');
+  expect(r.status).toBe(200);
+  expect(r.json.source).toBe('LiteLLM');
+  expect(r.json.fetchedAt).toEqual(expect.any(String));
+  expect(r.json.table['claude-haiku-5-5']).toEqual({ inputPerM: 0.1, cachedInputPerM: 0.01, outputPerM: 0.5 });
 });
 
 test('GET /api/routing describes the effective council and tier map', async () => {

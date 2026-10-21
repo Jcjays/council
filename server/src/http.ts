@@ -111,8 +111,9 @@ export function createServer(deps: ServerDeps): CouncilServer {
     }
 
     if (resource === 'pricing') {
-      if (method === 'GET') return { status: 200, body: deps.pricing.get() };
-      if (method === 'PUT') return { status: 200, body: await deps.pricing.update(body as PriceTable) };
+      if (!id && method === 'GET') return { status: 200, body: deps.pricing.status() };
+      if (!id && method === 'PUT') return { status: 200, body: await deps.pricing.setOverrides(body as PriceTable) };
+      if (id === 'refresh' && method === 'POST') return { status: 200, body: await deps.pricing.refresh() };
     }
 
     if (resource === 'budgets' && method === 'GET') return { status: 200, body: await engine.budgets() };
