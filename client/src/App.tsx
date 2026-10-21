@@ -28,7 +28,8 @@ function writeHash(next: string) {
 function readDetailsPref(): boolean {
   try {
     const v = localStorage.getItem(DETAILS_KEY);
-    return v === null ? window.innerWidth >= 1200 : v === '1';
+    // Open by default only where the pane has its own column (see the 1200px breakpoint in styles.css).
+    return v === null ? window.innerWidth > 1200 : v === '1';
   } catch {
     return true;
   }
