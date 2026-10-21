@@ -5,7 +5,7 @@ import { useStickToBottom } from '../hooks/useStickToBottom';
 import { costSource, formatUsd, PROVIDER_NAMES } from '../lib/format';
 import { isStreaming, statusPhrase, tabChips, toneOf } from '../lib/lanes';
 import { shouldAskAboutStall, stallMessage } from '../lib/stall';
-import { PROVIDERS, type ProjectInfo, type Provider, type Settings, type SubmitMode, type Tab } from '../types';
+import { PROVIDERS, type Provider, type Settings, type SubmitMode, type Tab } from '../types';
 import { Composer } from './Composer';
 import { Details } from './Details';
 import { Glyph } from './Glyph';
@@ -16,7 +16,6 @@ import { VoteCard } from './VoteCard';
 interface Props {
   tab: Tab;
   settings: Settings;
-  project: ProjectInfo | null;
   /** Number of stall notices received for this tab. */
   stallSeq: number;
   details: boolean;
@@ -24,12 +23,11 @@ interface Props {
   onError: (message: string) => void;
 }
 
-export function TabView({ tab, settings, project, stallSeq, details, onToggleDetails, onError }: Props) {
+export function TabView({ tab, settings, stallSeq, details, onToggleDetails, onError }: Props) {
   const [switching, setSwitching] = useState(false);
   const [switchProvider, setSwitchProvider] = useState<Provider>('claude');
   const [switchModel, setSwitchModel] = useState('');
   const [closing, setClosing] = useState(false);
-  const [deleteWorktree, setDeleteWorktree] = useState(true);
   const [busy, setBusy] = useState(false);
   const [dismissedStall, setDismissedStall] = useState<number | null>(null);
   const now = useNow(5_000);
@@ -50,10 +48,8 @@ export function TabView({ tab, settings, project, stallSeq, details, onToggleDet
 
   const settled = tab.status === 'idle' || tab.status === 'failed';
   const canEscalate = settled && tab.tier !== null && tab.tier !== 'hard';
-  const conflict = tab.lastMerge?.kind === 'conflict';
   const askingAboutStall = shouldAskAboutStall(tab, stallSeq, dismissedStall);
   const chips = tabChips(tab);
-  const target = project?.defaultBranch ?? 'the default branch';
   const drafting = tab.status === 'drafting' && tab.transcript.length === 0;
 
   return (
@@ -73,11 +69,6 @@ export function TabView({ tab, settings, project, stallSeq, details, onToggleDet
                   <Glyph provider={tab.worker.provider} />
                   {PROVIDER_NAMES[tab.worker.provider]} · {tab.worker.model ?? 'default model'}
                 </span>
-              )}
-              {tab.worktree && (
-                <code className="muted" title={tab.worktree.path}>
-                  {tab.worktree.branch}
-                </code>
               )}
               <span className="sec" title={`Spent on this tab, ${costSource(tab.worker?.provider)}`}>
                 {formatUsd(tab.costUsd)}
@@ -100,11 +91,6 @@ export function TabView({ tab, settings, project, stallSeq, details, onToggleDet
                 Switch worker
               </button>
             )}
-            {settled && tab.worktree && (
-              <button disabled={busy} className="primary" onClick={() => void act(() => api.merge(tab.id))} title={`Commit the worktree and merge into ${target}`}>
-                Merge
-              </button>
-            )}
             {tab.status !== 'closed' && (
               <button disabled={busy} className="quiet danger" onClick={() => setClosing((c) => !c)} aria-expanded={closing}>
                 Close
@@ -117,118 +103,86 @@ export function TabView({ tab, settings, project, stallSeq, details, onToggleDet
         </header>
 
         <div className="alerts">
-            {switching && settled && (
-              <div className="card inline-form">
-                <span>Hand this tab to</span>
-                <select value={switchProvider} onChange={(e) => setSwitchProvider(e.target.value as Provider)} aria-label="Switch provider">
-                  {PROVIDERS.map((p) => (
-                    <option key={p} value={p}>
-                      {PROVIDER_NAMES[p]}
-                    </option>
-                  ))}
-                </select>
-                <input list="switch-models" value={switchModel} onChange={(e) => setSwitchModel(e.target.value)} placeholder="default model" aria-label="Switch model" />
-                <datalist id="switch-models">
-                  {settings.models[switchProvider].map((m) => (
-                    <option key={m} value={m} />
-                  ))}
-                </datalist>
-                <button
-                  className="primary"
-                  disabled={busy}
-                  onClick={() =>
-                    void act(async () => {
-                      await api.switchWorker(tab.id, switchProvider, switchModel || null);
-                      setSwitching(false);
-                    })
-                  }
-                >
-                  {tab.worker?.provider === switchProvider ? 'Change model' : 'Switch'}
-                </button>
-                <button className="quiet" onClick={() => setSwitching(false)}>
-                  Cancel
-                </button>
-                <span className="muted sm">
-                  {tab.worker?.provider === switchProvider ? 'Same provider: the session continues with the new model.' : 'A summary of the work so far is handed to the new worker in the same worktree.'}
-                </span>
-              </div>
-            )}
+          {switching && settled && (
+            <div className="card inline-form">
+              <span>Hand this tab to</span>
+              <select value={switchProvider} onChange={(e) => setSwitchProvider(e.target.value as Provider)} aria-label="Switch provider">
+                {PROVIDERS.map((p) => (
+                  <option key={p} value={p}>
+                    {PROVIDER_NAMES[p]}
+                  </option>
+                ))}
+              </select>
+              <input list="switch-models" value={switchModel} onChange={(e) => setSwitchModel(e.target.value)} placeholder="default model" aria-label="Switch model" />
+              <datalist id="switch-models">
+                {settings.models[switchProvider].map((m) => (
+                  <option key={m} value={m} />
+                ))}
+              </datalist>
+              <button
+                className="primary"
+                disabled={busy}
+                onClick={() =>
+                  void act(async () => {
+                    await api.switchWorker(tab.id, switchProvider, switchModel || null);
+                    setSwitching(false);
+                  })
+                }
+              >
+                {tab.worker?.provider === switchProvider ? 'Change model' : 'Switch'}
+              </button>
+              <button className="quiet" onClick={() => setSwitching(false)}>
+                Cancel
+              </button>
+              <span className="muted sm">
+                {tab.worker?.provider === switchProvider ? 'Same provider: the session continues with the new model.' : 'A summary of the work so far is handed to the new worker; it carries on in the same checkout.'}
+              </span>
+            </div>
+          )}
 
-            {closing && (
-              <div className="card danger inline-form">
-                <span>Close this tab?</span>
-                <label>
-                  <input type="checkbox" checked={deleteWorktree} onChange={(e) => setDeleteWorktree(e.target.checked)} /> remove the worktree (the branch is kept if it has unmerged commits)
-                </label>
-                <button
-                  className="danger primary"
-                  disabled={busy}
-                  onClick={() =>
-                    void act(async () => {
-                      await api.close(tab.id, deleteWorktree);
-                      setClosing(false);
-                    })
-                  }
-                >
-                  Close tab
-                </button>
-                <button className="quiet" onClick={() => setClosing(false)}>
-                  Cancel
-                </button>
-              </div>
-            )}
+          {closing && (
+            <div className="card danger inline-form">
+              <span>Close this tab? A running worker is stopped. Changes already made to your checkout stay as they are.</span>
+              <button
+                className="danger primary"
+                disabled={busy}
+                onClick={() =>
+                  void act(async () => {
+                    await api.close(tab.id);
+                    setClosing(false);
+                  })
+                }
+              >
+                Close tab
+              </button>
+              <button className="quiet" onClick={() => setClosing(false)}>
+                Cancel
+              </button>
+            </div>
+          )}
 
-            {askingAboutStall && (
-              <div className="card warn inline-form" role="status">
-                <span>{stallMessage(settings.stallMinutes)}. The worker may be stuck.</span>
-                {tab.tier !== null && tab.tier !== 'hard' && (
-                  <button disabled={busy} className="primary" onClick={() => void act(() => api.escalate(tab.id))} title="Stop this worker and hand the task to the next tier up">
-                    Escalate
-                  </button>
-                )}
-                <button disabled={busy} onClick={() => setDismissedStall(stallSeq)}>
-                  Keep waiting
+          {askingAboutStall && (
+            <div className="card warn inline-form" role="status">
+              <span>{stallMessage(settings.stallMinutes)}. The worker may be stuck.</span>
+              {tab.tier !== null && tab.tier !== 'hard' && (
+                <button disabled={busy} className="primary" onClick={() => void act(() => api.escalate(tab.id))} title="Stop this worker and hand the task to the next tier up">
+                  Escalate
                 </button>
-              </div>
-            )}
-
-            {tab.lastMerge && tab.lastMerge.kind !== 'merged' && (
-              <div className={`card ${tab.lastMerge.kind === 'conflict' ? 'danger' : 'warn'}`}>
-                <div>
-                  {tab.lastMerge.kind === 'conflict'
-                    ? `Merge conflict in ${tab.lastMerge.files.join(', ')}. Ask the worker to rebase, or resolve it yourself.`
-                    : `Merge blocked: ${tab.lastMerge.reason}${tab.lastMerge.files ? ` (${tab.lastMerge.files.join(', ')})` : ''}`}
-                </div>
-                <div className="row wrap">
-                  {settled && conflict && (
-                    <button disabled={busy} onClick={() => void act(() => api.rebase(tab.id))} title="Ask the worker to rebase onto the default branch and resolve conflicts">
-                      Ask worker to rebase
-                    </button>
-                  )}
-                  {tab.lastMerge.kind === 'blocked' && tab.worktree && (
-                    <>
-                      <span className="sm">{tab.ready ? 'Ready: the branch is committed and yours to merge.' : 'Or leave the branch for yourself to merge:'}</span>
-                      <code>{tab.worktree.branch}</code>
-                      <button className="link sm" onClick={() => void navigator.clipboard?.writeText(tab.worktree?.branch ?? '')} title="Copy the branch name">
-                        copy
-                      </button>
-                      {settled && tab.ready === false && (
-                        <button className="sm" disabled={busy} onClick={() => void act(() => api.markReady(tab.id))} title="Keep the branch as it is and mark this tab ready for you to merge by hand">
-                          Mark ready
-                        </button>
-                      )}
-                    </>
-                  )}
-                </div>
-              </div>
-            )}
+              )}
+              <button disabled={busy} onClick={() => setDismissedStall(stallSeq)}>
+                Keep waiting
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="stream" ref={streamRef}>
           {drafting && (
             <div className="draft-intro">
               <h3>What should the council work on?</h3>
-              <p className="sec">Describe the task below. Auto lets three cheap seats rate it and route it; or pick a provider to skip the vote.</p>
+              <p className="sec">
+                Describe the task below. Auto lets three cheap seats rate it and route it; or pick a provider to skip the vote. The worker edits this checkout directly and follows its CLAUDE.md, AGENTS.md or GEMINI.md.
+              </p>
               <Steps />
             </div>
           )}
@@ -236,7 +190,7 @@ export function TabView({ tab, settings, project, stallSeq, details, onToggleDet
           <Transcript
             items={tab.transcript}
             provider={tab.worker?.provider ?? null}
-            pathBase={tab.worktree?.path ?? null}
+            pathBase={tab.projectRoot}
             voteCard={tab.vote ? <VoteCard tab={tab} settings={settings} onStart={(pick) => act(() => api.start(tab.id, pick))} /> : undefined}
           />
 
@@ -258,16 +212,7 @@ export function TabView({ tab, settings, project, stallSeq, details, onToggleDet
         />
       </div>
 
-      {details && (
-        <Details
-          tab={tab}
-          project={project}
-          busy={busy}
-          onMerge={() => void act(() => api.merge(tab.id))}
-          onRebase={() => void act(() => api.rebase(tab.id))}
-          onMarkReady={() => void act(() => api.markReady(tab.id))}
-        />
-      )}
+      {details && <Details tab={tab} />}
     </main>
   );
 }

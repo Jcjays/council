@@ -38,7 +38,7 @@ interface Props {
   provider: Provider | null;
   /** The vote card, rendered where the council voted (or first, when the transcript has no vote item). */
   voteCard?: ReactNode;
-  /** The worktree path; tool paths inside it are shown relative to it. */
+  /** The project checkout; tool paths inside it are shown relative to it. */
   pathBase?: string | null;
 }
 

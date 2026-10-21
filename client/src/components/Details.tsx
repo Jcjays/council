@@ -1,18 +1,9 @@
 import { useMemo } from 'react';
-import { costSource, formatUsd, PROVIDER_NAMES, shortenPath } from '../lib/format';
+import { basename, costSource, formatUsd, PROVIDER_NAMES, shortenPath } from '../lib/format';
 import { filesTouched } from '../lib/tools';
-import type { ProjectInfo, Tab, TabWorker } from '../types';
+import type { Tab, TabWorker } from '../types';
 import { Glyph } from './Glyph';
 import { tally } from './VoteCard';
-
-interface Props {
-  tab: Tab;
-  project: ProjectInfo | null;
-  busy: boolean;
-  onMerge: () => void;
-  onRebase: () => void;
-  onMarkReady: () => void;
-}
 
 function Worker({ w }: { w: TabWorker }) {
   return (
@@ -23,28 +14,10 @@ function Worker({ w }: { w: TabWorker }) {
   );
 }
 
-function copy(text: string) {
-  void navigator.clipboard?.writeText(text);
-}
-
-/** The right-hand pane: worker, routing, branch, cost and the files the transcript touched. */
-export function Details({ tab, project, busy, onMerge, onRebase, onMarkReady }: Props) {
+/** The right-hand pane: worker, routing, the checkout being edited, cost and the files the transcript touched. */
+export function Details({ tab }: { tab: Tab }) {
   const files = useMemo(() => filesTouched(tab.transcript), [tab.transcript]);
   const voteCost = tab.vote ? tab.vote.seats.reduce((s, x) => s + x.costUsd, 0) : 0;
-  const settled = tab.status === 'idle' || tab.status === 'failed';
-  const merge = tab.lastMerge;
-  const target = project?.defaultBranch ?? 'the default branch';
-  const mergeState = !tab.worktree
-    ? 'no worktree'
-    : tab.status === 'merged' || merge?.kind === 'merged'
-      ? `merged${merge?.kind === 'merged' ? ` (${merge.sha.slice(0, 7)})` : ''}`
-      : merge?.kind === 'conflict'
-        ? `conflict in ${merge.files.join(', ')}`
-        : merge?.kind === 'blocked'
-          ? `blocked: ${merge.reason}`
-          : tab.ready
-            ? 'ready for you to merge'
-            : 'not merged yet';
 
   return (
     <aside className="details" aria-label="Tab details">
@@ -112,43 +85,16 @@ export function Details({ tab, project, busy, onMerge, onRebase, onMarkReady }: 
       </section>
 
       <section>
-        <h5>Branch</h5>
-        {tab.worktree ? (
-          <>
-            <div className="kv">
-              <span className="k">Branch</span>
-              <span className="v mono">{tab.worktree.branch}</span>
-              <span className="k">Worktree</span>
-              <span className="v mono xs muted" title={tab.worktree.path}>
-                {tab.worktree.path}
-              </span>
-              <span className="k">Merge</span>
-              <span className={`v${merge?.kind === 'conflict' ? ' danger-text' : merge?.kind === 'blocked' ? ' warn-text' : ''}`}>{mergeState}</span>
-            </div>
-            <div className="row wrap">
-              {settled && tab.status !== 'merged' && (
-                <button className="primary sm" disabled={busy} onClick={onMerge} title={`Commit the worktree and merge into ${target}`}>
-                  Merge into {project?.defaultBranch ?? 'default'}
-                </button>
-              )}
-              {settled && merge?.kind === 'conflict' && (
-                <button className="sm" disabled={busy} onClick={onRebase} title="Ask the worker to rebase onto the default branch and resolve conflicts">
-                  Ask worker to rebase
-                </button>
-              )}
-              {settled && merge?.kind === 'blocked' && tab.ready === false && (
-                <button className="sm" disabled={busy} onClick={onMarkReady} title="Keep the branch as it is and mark this tab ready for you to merge by hand">
-                  Mark ready
-                </button>
-              )}
-              <button className="quiet sm" onClick={() => copy(tab.worktree?.branch ?? '')} title="Copy the branch name">
-                Copy branch
-              </button>
-            </div>
-          </>
-        ) : (
-          <span className="muted sm">A branch and worktree are created when the worker starts.</span>
-        )}
+        <h5>Checkout</h5>
+        <div className="kv">
+          <span className="k">Project</span>
+          <span className="v">{basename(tab.projectRoot)}</span>
+          <span className="k">Path</span>
+          <span className="v mono xs muted" title={tab.projectRoot}>
+            {tab.projectRoot}
+          </span>
+        </div>
+        <span className="muted xs">The worker edits this checkout in place and commits nothing. Review the changes in your editor or with git.</span>
       </section>
 
       <section>
@@ -177,7 +123,7 @@ export function Details({ tab, project, busy, onMerge, onRebase, onMarkReady }: 
             {files.map((f) => (
               <div key={f.path} className="file" title={`${f.path} (${f.label})`}>
                 <span className="muted">{f.label === 'written' || f.label === 'added' ? '+' : f.label === 'deleted' ? '−' : '✎'}</span>
-                <span className="name">{shortenPath(f.path, tab.worktree?.path)}</span>
+                <span className="name">{shortenPath(f.path, tab.projectRoot)}</span>
                 {(f.added > 0 || f.removed > 0) && (
                   <span className="pm">
                     {f.added > 0 && <span className="add">+{f.added}</span>}

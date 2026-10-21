@@ -7,11 +7,9 @@ import { DEFAULT_PRICING } from '../../src/ledger/pricing.js';
 import { TaskEngine } from '../../src/tasks/engine.js';
 import { TabStore } from '../../src/tasks/store.js';
 import { FakeAdapter, registry, voteEvents, workEvents } from './fakeAdapter.js';
-import { FakeWorktrees } from './fakeWorktrees.js';
 
 export interface EngineFixture {
   engine: TaskEngine;
-  worktrees: FakeWorktrees;
   ledgerFile: string;
   home: string;
   adapters: Record<Provider, FakeAdapter>;
@@ -33,11 +31,10 @@ export function makeEngine(overrides: Partial<Settings> = {}): EngineFixture {
     codex: simpleAdapter('codex', 'easy'),
     claude: simpleAdapter('claude', 'hard'),
   };
-  const worktrees = new FakeWorktrees('C:/proj');
   const settings: Settings = { ...DEFAULT_SETTINGS, ...overrides };
   const engine = new TaskEngine({
     adapters: registry(adapters.claude, adapters.codex, adapters.gemini) as Record<Provider, Adapter>,
-    worktrees: () => worktrees,
+    diffStat: async () => ' a.txt | 1 +',
     store: new TabStore(path.join(home, 'projects')),
     ledgerFile,
     settings: () => settings,
@@ -45,5 +42,5 @@ export function makeEngine(overrides: Partial<Settings> = {}): EngineFixture {
     snapshot: async () => 'Top-level: src/',
   });
   engine.on('engine-error', () => {});
-  return { engine, worktrees, ledgerFile, home, adapters, settings };
+  return { engine, ledgerFile, home, adapters, settings };
 }

@@ -28,7 +28,6 @@ test('newTab starts drafting with empty transcript and the project identity', ()
     tier: null,
     worker: null,
     previousWorkers: [],
-    worktree: null,
     vote: null,
     routing: null,
     transcript: [],
@@ -36,8 +35,8 @@ test('newTab starts drafting with empty transcript and the project identity', ()
     fullAuto: false,
     escalations: 0,
     stalled: false,
-    lastMerge: null,
   });
+  expect('worktree' in tab).toBe(false);
   expect(tab.id).toMatch(/^[a-z0-9]{10,}$/);
   expect(tab.createdAt).toBe(tab.updatedAt);
 });

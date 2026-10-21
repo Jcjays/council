@@ -2,6 +2,8 @@
 
 A local router that puts Claude, Codex and Gemini to work on one project. Approved 2026-10-20.
 
+> **Change 2026-10-21 (Chris):** per-tab git worktrees, automatic commits and the Merge step are dropped. Workers run directly in the project checkout, commit nothing, and follow the project's own CLAUDE.md / AGENTS.md / GEMINI.md; the developer reviews the changes in their editor or git. Parallel tabs on the same files can collide, which the developer manages. Budgets should also be detected automatically where the CLIs expose their usage windows. Sections below that mention worktrees or merging are superseded by this note.
+
 ## Context
 
 Each developer at the company gets monthly API credit per provider: $40 Anthropic, $30 OpenAI (Codex), $30 Google (Gemini). Today developers use a mix of the three CLIs and the chat apps and switch between them by hand, and the strongest (most expensive) model ends up doing trivial work.

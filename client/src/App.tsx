@@ -78,8 +78,8 @@ export function App() {
     setProject({ root: info.root, projectId: info.projectId, defaultBranch: info.defaultBranch });
     setTabs((prev) => ({ ...prev, ...Object.fromEntries(info.tabs.map((t) => [t.id, t])) }));
     setProjects(await api.projects());
-    // Keep the selection when it belongs to the project just opened (a reload, or re-opening the same checkout).
-    setSelectedId((cur) => (cur && info.tabs.some((t) => t.id === cur) ? cur : null));
+    // The selection is never cleared here: a tab from another project simply stops being shown (see `selected`),
+    // so a deep link that opens its own project keeps its tab even when the initial project load finishes later.
   }, []);
 
   useEffect(() => {
@@ -110,7 +110,9 @@ export function App() {
 
   const projectTabs = useMemo(() => Object.values(tabs).filter((t) => project && t.projectId === project.projectId), [tabs, project]);
   const openTabs = useMemo(() => projectTabs.filter((t) => t.status !== 'closed'), [projectTabs]);
-  const selected = selectedId ? tabs[selectedId] : undefined;
+  const selectedTab = selectedId ? tabs[selectedId] : undefined;
+  /** The selected tab, when it belongs to the open project; a tab from another project is simply not shown. */
+  const selected = selectedTab && project && selectedTab.projectId === project.projectId ? selectedTab : undefined;
 
   const select = useCallback((id: string | null) => {
     if (id) setSelectedId(id);
@@ -230,7 +232,7 @@ export function App() {
         {view === 'settings' && settings ? (
           <Settings settings={settings} onSaved={setSettings} health={health} onError={onError} />
         ) : selected && settings ? (
-          <TabView key={selected.id} tab={selected} settings={settings} project={project} stallSeq={stallSeq[selected.id] ?? 0} details={details} onToggleDetails={toggleDetails} onError={onError} />
+          <TabView key={selected.id} tab={selected} settings={settings} stallSeq={stallSeq[selected.id] ?? 0} details={details} onToggleDetails={toggleDetails} onError={onError} />
         ) : (
           <Home
             projects={projects}

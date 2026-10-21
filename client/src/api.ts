@@ -1,4 +1,4 @@
-import type { BudgetState, CliHealth, MergeResult, PriceTable, ProjectInfo, Provider, Settings, SubmitMode, Tab } from './types';
+import type { BudgetState, CliHealth, PriceTable, ProjectInfo, Provider, Settings, SubmitMode, Tab } from './types';
 
 async function call<T>(method: string, route: string, body?: unknown): Promise<T> {
   const res = await fetch(route, {
@@ -35,8 +35,5 @@ export const api = {
   send: (id: string, text: string) => call<Tab>('POST', `/api/tabs/${id}/send`, { text }),
   escalate: (id: string) => call<Tab>('POST', `/api/tabs/${id}/escalate`),
   switchWorker: (id: string, provider: Provider, model: string | null) => call<Tab>('POST', `/api/tabs/${id}/switch`, { provider, model }),
-  merge: (id: string) => call<{ tab: Tab; result: MergeResult }>('POST', `/api/tabs/${id}/merge`),
-  rebase: (id: string) => call<Tab>('POST', `/api/tabs/${id}/rebase`),
-  markReady: (id: string) => call<Tab>('POST', `/api/tabs/${id}/ready`),
-  close: (id: string, deleteWorktree: boolean) => call<Tab>('POST', `/api/tabs/${id}/close`, { deleteWorktree }),
+  close: (id: string) => call<Tab>('POST', `/api/tabs/${id}/close`, {}),
 };

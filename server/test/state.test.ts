@@ -32,9 +32,8 @@ test('escalate and switch hand the tab off from idle or failed, then run again',
   expect(transition('handing-off', 'handoff-ready')).toBe('running');
 });
 
-test('merge-done is reachable from idle and failed', () => {
-  expect(transition('idle', 'merge-done')).toBe('merged');
-  expect(transition('failed', 'merge-done')).toBe('merged');
+test('there is no merge state: tabs end in idle, failed or closed', () => {
+  expect(TAB_STATUSES).not.toContain('merged');
 });
 
 test('close works from every state', () => {

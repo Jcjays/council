@@ -12,7 +12,6 @@ function tab(over: Partial<Tab> = {}): Tab {
     tier: null,
     worker: null,
     previousWorkers: [],
-    worktree: null,
     vote: null,
     routing: null,
     transcript: [],
@@ -20,7 +19,6 @@ function tab(over: Partial<Tab> = {}): Tab {
     fullAuto: false,
     escalations: 0,
     stalled: false,
-    lastMerge: null,
     createdAt: '2026-10-21T10:00:00Z',
     updatedAt: '2026-10-21T10:00:00Z',
     ...over,
@@ -36,7 +34,6 @@ test('laneOf puts decisions first and a stalled worker with them', () => {
   expect(laneOf(tab({ status: 'voting' }))).toBe('working');
   expect(laneOf(tab({ status: 'handing-off' }))).toBe('working');
   expect(laneOf(tab({ status: 'drafting' }))).toBe('draft');
-  expect(laneOf(tab({ status: 'merged' }))).toBe('done');
   expect(laneOf(tab({ status: 'closed' }))).toBe('closed');
 });
 
@@ -44,8 +41,8 @@ test('toneOf colours failures red and otherwise follows the lane', () => {
   expect(toneOf(tab({ status: 'failed' }))).toBe('danger');
   expect(toneOf(tab({ status: 'idle' }))).toBe('warn');
   expect(toneOf(tab({ status: 'running' }))).toBe('accent');
-  expect(toneOf(tab({ status: 'merged' }))).toBe('merged');
   expect(toneOf(tab({ status: 'drafting' }))).toBe('muted');
+  expect(toneOf(tab({ status: 'closed' }))).toBe('muted');
 });
 
 test('isStreaming is true only while a CLI runs', () => {
@@ -77,16 +74,9 @@ test('statusPhrase derives a phrase, with elapsed time while working', () => {
 });
 
 test('tabChips lists risks and modes', () => {
-  const t = tab({
-    status: 'running',
-    stalled: true,
-    fullAuto: true,
-    escalations: 2,
-    routing: { shiftedFrom: 'medium', reason: 'Codex budget exhausted' },
-    lastMerge: { kind: 'conflict', files: ['a.ts'] },
-  });
-  expect(tabChips(t).map((c) => c.label)).toEqual(['stalled', 'conflict', 'rerouted', 'escalated ×2', 'full auto']);
-  expect(tabChips(tab({ lastMerge: { kind: 'blocked', reason: 'dirty' }, ready: true })).map((c) => c.label)).toEqual(['blocked', 'ready']);
+  const t = tab({ status: 'running', stalled: true, fullAuto: true, escalations: 2, routing: { shiftedFrom: 'medium', reason: 'Codex budget exhausted' } });
+  expect(tabChips(t).map((c) => c.label)).toEqual(['stalled', 'rerouted', 'escalated ×2', 'full auto']);
+  expect(tabChips(tab({ escalations: 1 })).map((c) => c.label)).toEqual(['escalated']);
   expect(tabChips(tab())).toEqual([]);
 });
 
@@ -113,5 +103,5 @@ test('stepThrough wraps and starts from the ends when nothing is selected', () =
 });
 
 test('laneCounts counts working and needs-you tabs', () => {
-  expect(laneCounts([tab({ status: 'running' }), tab({ status: 'voting' }), tab({ status: 'idle' }), tab({ status: 'merged' })])).toEqual({ working: 2, needsYou: 1 });
+  expect(laneCounts([tab({ status: 'running' }), tab({ status: 'voting' }), tab({ status: 'idle' }), tab({ status: 'closed' })])).toEqual({ working: 2, needsYou: 1 });
 });

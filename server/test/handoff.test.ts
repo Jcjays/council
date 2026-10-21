@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { buildHandoffPrompt, buildRebasePrompt, buildSummaryPrompt, mechanicalSummary } from '../src/tasks/handoff.js';
+import { buildHandoffPrompt, buildSummaryPrompt, mechanicalSummary } from '../src/tasks/handoff.js';
 import type { TranscriptItem } from '../src/tasks/types.js';
 
 const items: TranscriptItem[] = [
@@ -24,20 +24,15 @@ test('the hand-off prompt carries task, summary, diff stat, previous worker and 
   expect(p).toMatch(/escalat/i);
   expect(p).toContain('<task>');
   expect(p).toContain('</task>');
-  expect(p).toMatch(/same (git )?worktree/i);
+  expect(p).toMatch(/same (project|checkout|working copy)/i);
+  expect(p).toMatch(/do not commit/i);
+  expect(p).toMatch(/CLAUDE\.md|AGENTS\.md|GEMINI\.md/);
 });
 
 test('a switch reads as a hand-over rather than a failure', () => {
   const p = buildHandoffPrompt({ task: 't', summary: 's', diffStat: '', fromWorker: 'codex', reason: 'switch' });
   expect(p).not.toMatch(/failed|stalled/i);
   expect(p).toMatch(/taking over|continue/i);
-});
-
-test('the rebase prompt names the default branch and asks for conflict resolution', () => {
-  const p = buildRebasePrompt('develop');
-  expect(p).toContain('git rebase develop');
-  expect(p).toMatch(/resolve/i);
-  expect(p).toMatch(/conflict/i);
 });
 
 test('the summary prompt includes the transcript and asks for a short hand-off summary', () => {

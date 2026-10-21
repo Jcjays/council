@@ -16,7 +16,6 @@ import { TaskEngine } from '../src/tasks/engine.js';
 import type { TabStatus } from '../src/tasks/state.js';
 import { TabStore } from '../src/tasks/store.js';
 import type { Tab } from '../src/tasks/types.js';
-import { WorktreeManager } from '../src/worktrees/manager.js';
 
 const CHEAP_MODEL: Record<Provider, string | null> = { claude: 'claude-haiku-5-5', gemini: 'flash', codex: 'gpt-5.1-codex-mini' };
 
@@ -48,10 +47,10 @@ interface Outcome {
   skipped?: string;
   ok?: boolean;
   status?: TabStatus;
-  merged?: string;
+  editedInPlace?: boolean;
+  committedNothing?: boolean;
   costUsd?: number;
   tokensOut?: number;
-  worktreeRemoved?: boolean;
   error?: string;
 }
 
@@ -67,6 +66,7 @@ async function main(): Promise<void> {
   fs.writeFileSync(path.join(repo, 'README.md'), '# e2e\n\nScratch repo.\n');
   git(repo, 'add', '-A');
   git(repo, 'commit', '-q', '-m', 'init');
+  const baseline = git(repo, 'rev-parse', 'HEAD');
 
   const health = await checkAll(adapters);
   console.table(health);
@@ -74,7 +74,6 @@ async function main(): Promise<void> {
   const ledgerFile = path.join(home, 'ledger.jsonl');
   const engine = new TaskEngine({
     adapters,
-    worktrees: (root) => new WorktreeManager(root),
     store: new TabStore(path.join(home, 'projects')),
     ledgerFile,
     settings: () => ({ ...DEFAULT_SETTINGS, autoEscalate: false, stallMinutes: 5 }),
@@ -103,21 +102,21 @@ async function main(): Promise<void> {
     const tab = await engine.createTab(repo, `e2e ${provider}`);
     const marker = `council e2e ${provider}`;
     try {
-      await engine.submit(tab.id, `Append the line "${marker}" to the end of README.md. Do not commit.`, { kind: 'manual', provider, model: CHEAP_MODEL[provider] });
+      await engine.submit(tab.id, `Append the line "${marker}" to the end of README.md.`, { kind: 'manual', provider, model: CHEAP_MODEL[provider] });
       const done = await waitFor(engine, tab.id, ['idle', 'failed'], 5 * 60_000);
       if (done.status !== 'idle') {
         const lastError = [...done.transcript].reverse().find((i) => i.kind === 'error' || i.kind === 'result')?.text;
         outcomes.push({ provider, ok: false, status: done.status, error: lastError?.slice(0, 200) });
-        await engine.close(tab.id, { deleteWorktree: true });
+        await engine.close(tab.id);
         continue;
       }
-      const { result } = await engine.merge(tab.id);
       const readme = fs.readFileSync(path.join(repo, 'README.md'), 'utf8');
       const work = (await readEntries(ledgerFile)).filter((e) => e.tabId === tab.id && e.purpose === 'work');
-      const closed = await engine.close(tab.id, { deleteWorktree: true });
-      const worktreeRemoved = closed.worktree ? !fs.existsSync(closed.worktree.path) : true;
-      const ok = result.kind === 'merged' && readme.includes(marker) && work.length === 1 && (work[0]?.costUsd ?? 0) > 0 && worktreeRemoved;
-      outcomes.push({ provider, ok, status: done.status, merged: result.kind, costUsd: work[0]?.costUsd, tokensOut: work[0]?.usage.outputTokens, worktreeRemoved });
+      await engine.close(tab.id);
+      const editedInPlace = readme.includes(marker);
+      const committedNothing = git(repo, 'rev-parse', 'HEAD') === baseline;
+      const ok = editedInPlace && committedNothing && work.length === 1 && (work[0]?.costUsd ?? 0) > 0;
+      outcomes.push({ provider, ok, status: done.status, editedInPlace, committedNothing, costUsd: work[0]?.costUsd, tokensOut: work[0]?.usage.outputTokens });
     } catch (err) {
       outcomes.push({ provider, ok: false, error: (err as Error).message.slice(0, 200) });
     }

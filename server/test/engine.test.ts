@@ -11,7 +11,6 @@ import { TabStore } from '../src/tasks/store.js';
 import type { Tab } from '../src/tasks/types.js';
 import type { TabStatus } from '../src/tasks/state.js';
 import { FakeAdapter, failEvents, registry, voteEvents, workEvents, type FakeScript } from './helpers/fakeAdapter.js';
-import { FakeWorktrees } from './helpers/fakeWorktrees.js';
 
 type Scripts = Partial<Record<'vote' | 'work' | 'summarize', FakeScript>>;
 
@@ -32,7 +31,6 @@ function scripted(provider: Provider, tier: string, scripts: Scripts = {}): Fake
 
 interface Setup {
   engine: TaskEngine;
-  worktrees: FakeWorktrees;
   ledgerFile: string;
   adapters: Record<Provider, FakeAdapter>;
 }
@@ -45,11 +43,10 @@ function setup(opts: { settings?: Partial<Settings>; adapters?: Partial<Record<P
     codex: opts.adapters?.codex ?? scripted('codex', 'easy'),
     claude: opts.adapters?.claude ?? scripted('claude', 'hard'),
   };
-  const worktrees = new FakeWorktrees('C:/proj');
   const settings: Settings = { ...DEFAULT_SETTINGS, ...opts.settings };
   const engine = new TaskEngine({
     adapters: registry(adapters.claude, adapters.codex, adapters.gemini) as Record<Provider, Adapter>,
-    worktrees: () => worktrees,
+    diffStat: async () => ' a.txt | 1 +',
     store: new TabStore(path.join(home, 'projects')),
     ledgerFile,
     settings: () => settings,
@@ -61,7 +58,7 @@ function setup(opts: { settings?: Partial<Settings>; adapters?: Partial<Record<P
       ),
   });
   engine.on('engine-error', () => {});
-  return { engine, worktrees, ledgerFile, adapters };
+  return { engine, ledgerFile, adapters };
 }
 
 function waitFor(engine: TaskEngine, tabId: string, statuses: TabStatus[], timeoutMs = 5000): Promise<Tab> {
@@ -84,15 +81,13 @@ function waitFor(engine: TaskEngine, tabId: string, statuses: TabStatus[], timeo
 }
 
 test('auto submit: council votes, tab waits for start, then the worker streams to idle and everything is ledgered', async () => {
-  const { engine, worktrees, ledgerFile, adapters } = setup();
+  const { engine, ledgerFile, adapters } = setup();
   const tab = await engine.createTab('C:/proj', 'Rename foo');
   await engine.submit(tab.id, 'Rename foo to bar in src/a.ts', { kind: 'auto' });
   const voted = await waitFor(engine, tab.id, ['awaiting-start']);
   expect(voted.tier).toBe('easy');
   expect(voted.vote?.seats).toHaveLength(3);
   expect(voted.worker).toEqual({ provider: 'gemini', model: 'flash', sessionId: null });
-  expect(voted.worktree?.branch).toMatch(/^council\/rename-foo-/);
-  expect(worktrees.created[0]).toEqual({ tabId: tab.id, title: 'Rename foo' });
   expect(voted.transcript.map((i) => i.kind)).toEqual(['user', 'vote']);
   const votes = await readEntries(ledgerFile);
   expect(votes).toHaveLength(3);
@@ -109,7 +104,7 @@ test('auto submit: council votes, tab waits for start, then the worker streams t
   expect(all.filter((e) => e.purpose === 'work')).toHaveLength(1);
   expect(idle.costUsd).toBeCloseTo(0.001 * 3 + 0.01, 6);
   const workCall = adapters.gemini.calls.find((c) => c.purpose === 'work');
-  expect(workCall).toMatchObject({ cwd: `C:/proj/.worktrees/${tab.id}`, model: 'flash', prompt: 'Rename foo to bar in src/a.ts', fullAuto: false });
+  expect(workCall).toMatchObject({ cwd: 'C:/proj', model: 'flash', prompt: 'Rename foo to bar in src/a.ts', fullAuto: false });
   expect(workCall?.resumeId).toBeUndefined();
   expect(workCall?.allowedCommands).toEqual(DEFAULT_SETTINGS.allowedCommands);
 });
@@ -225,12 +220,12 @@ test('closing a running tab aborts the worker and applies no further events', as
   const slow = new FakeAdapter('gemini', (opts: RunOptions) =>
     opts.purpose === 'vote' ? { events: voteEvents('easy') } : { events: workEvents(), delayMs: 150 },
   );
-  const { engine, worktrees } = setup({ settings: { autoStart: true }, adapters: { gemini: slow } });
+  const { engine } = setup({ settings: { autoStart: true }, adapters: { gemini: slow } });
   const tab = await engine.createTab('C:/proj', 't');
   await engine.submit(tab.id, 'go', { kind: 'auto' });
   await waitFor(engine, tab.id, ['running']);
   for (let i = 0; i < 50 && !slow.calls.some((c) => c.purpose === 'work'); i++) await new Promise((r) => setTimeout(r, 20));
-  const closed = await engine.close(tab.id, { deleteWorktree: true });
+  const closed = await engine.close(tab.id);
   expect(closed.status).toBe('closed');
   const workCall = slow.calls.find((c) => c.purpose === 'work');
   expect(workCall?.signal?.aborted).toBe(true);
@@ -238,40 +233,15 @@ test('closing a running tab aborts the worker and applies no further events', as
   await new Promise((r) => setTimeout(r, 500));
   expect(engine.getTab(tab.id)?.transcript.length).toBe(count);
   expect(engine.getTab(tab.id)?.status).toBe('closed');
-  expect(worktrees.removed).toEqual([{ path: `C:/proj/.worktrees/${tab.id}`, keepBranch: true }]);
 });
 
-test('merge commits the worktree and marks the tab merged; a conflict leaves it idle with the result', async () => {
-  const { engine, worktrees } = setup({ settings: { autoStart: true } });
+test('workers run in the project checkout itself; tabs carry no worktree', async () => {
+  const { engine, adapters } = setup({ settings: { autoStart: true } });
   const tab = await engine.createTab('C:/proj', 'Add thing');
   await engine.submit(tab.id, 'add', { kind: 'auto' });
-  await waitFor(engine, tab.id, ['idle']);
-  const { tab: merged, result } = await engine.merge(tab.id);
-  expect(result.kind).toBe('merged');
-  expect(merged.status).toBe('merged');
-  expect(worktrees.commits).toEqual([`council(${tab.id}): Add thing`]);
-
-  const { engine: e2, worktrees: w2 } = setup({ settings: { autoStart: true } });
-  w2.mergeResult = { kind: 'conflict', files: ['README.md'] };
-  const t2 = await e2.createTab('C:/proj', 'x');
-  await e2.submit(t2.id, 'x', { kind: 'auto' });
-  await waitFor(e2, t2.id, ['idle']);
-  const second = await e2.merge(t2.id);
-  expect(second.result).toEqual({ kind: 'conflict', files: ['README.md'] });
-  expect(second.tab.status).toBe('idle');
-  expect(second.tab.lastMerge).toEqual({ kind: 'conflict', files: ['README.md'] });
-});
-
-test('askRebase sends the rebase prompt to the current worker', async () => {
-  const { engine, adapters } = setup({ settings: { autoStart: true } });
-  const tab = await engine.createTab('C:/proj', 't');
-  await engine.submit(tab.id, 'x', { kind: 'auto' });
-  await waitFor(engine, tab.id, ['idle']);
-  await engine.askRebase(tab.id);
-  await waitFor(engine, tab.id, ['running']);
-  await waitFor(engine, tab.id, ['idle']);
-  const calls = adapters.gemini.calls.filter((c) => c.purpose === 'work');
-  expect(calls[1]?.prompt).toContain('git rebase main');
+  const idle = await waitFor(engine, tab.id, ['idle']);
+  expect('worktree' in idle).toBe(false);
+  expect(adapters.gemini.calls.every((c) => c.cwd === 'C:/proj')).toBe(true);
 });
 
 test('a silent worker trips the stall flag once, and output clears it', async () => {
@@ -342,20 +312,6 @@ test('streaming many events emits few full-tab updates and clips oversized tool 
   const toolItem = idle.transcript.find((i) => i.kind === 'tool');
   expect((toolItem?.tool?.output ?? '').length).toBeLessThan(25_000);
   expect(idle.transcript.filter((i) => i.kind === 'assistant')).toHaveLength(40);
-});
-
-test('close persists the closed state even when worktree removal fails', async () => {
-  const { engine, worktrees } = setup({ settings: { autoStart: true } });
-  worktrees.remove = async () => {
-    throw new Error('EBUSY: resource busy');
-  };
-  const tab = await engine.createTab('C:/proj', 't');
-  await engine.submit(tab.id, 'x', { kind: 'auto' });
-  await waitFor(engine, tab.id, ['idle']);
-  const closed = await engine.close(tab.id, { deleteWorktree: true });
-  expect(closed.status).toBe('closed');
-  expect(closed.transcript.some((i) => i.kind === 'error' && /EBUSY/.test(i.text ?? ''))).toBe(true);
-  expect(engine.getTab(tab.id)?.status).toBe('closed');
 });
 
 test('budgets reflect the ledger against the configured limits', async () => {

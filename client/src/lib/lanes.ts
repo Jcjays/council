@@ -6,13 +6,13 @@ import { elapsed } from './format';
  * agent-orchestrator's board columns): the lane says whose turn it is, and the
  * sidebar groups tabs by it so the ones that need a decision come first.
  */
-export type Lane = 'needs-you' | 'working' | 'draft' | 'done' | 'closed';
-export const LANE_ORDER: Lane[] = ['needs-you', 'working', 'draft', 'done'];
-export const LANE_LABELS: Record<Lane, string> = { 'needs-you': 'Needs you', working: 'Working', draft: 'Drafts', done: 'Done', closed: 'Closed' };
+export type Lane = 'needs-you' | 'working' | 'draft' | 'closed';
+export const LANE_ORDER: Lane[] = ['needs-you', 'working', 'draft'];
+export const LANE_LABELS: Record<Lane, string> = { 'needs-you': 'Needs you', working: 'Working', draft: 'Drafts', closed: 'Closed' };
 
-export type Tone = 'accent' | 'warn' | 'danger' | 'merged' | 'muted' | 'ok';
+export type Tone = 'accent' | 'warn' | 'danger' | 'muted' | 'ok';
 
-type LaneTab = Pick<Tab, 'status' | 'stalled' | 'lastMerge'>;
+type LaneTab = Pick<Tab, 'status' | 'stalled'>;
 
 export function laneOf(tab: LaneTab): Lane {
   switch (tab.status) {
@@ -27,8 +27,6 @@ export function laneOf(tab: LaneTab): Lane {
     case 'idle':
     case 'failed':
       return 'needs-you';
-    case 'merged':
-      return 'done';
     case 'closed':
       return 'closed';
   }
@@ -42,8 +40,6 @@ export function toneOf(tab: LaneTab): Tone {
       return 'warn';
     case 'working':
       return 'accent';
-    case 'done':
-      return 'merged';
     default:
       return 'muted';
   }
@@ -83,8 +79,6 @@ export function statusPhrase(tab: Pick<Tab, 'status' | 'stalled' | 'transcript' 
       return 'Handing off…';
     case 'failed':
       return 'Failed';
-    case 'merged':
-      return 'Merged';
     case 'closed':
       return 'Closed';
   }
@@ -97,12 +91,9 @@ export interface Chip {
 }
 
 /** Risk and mode chips for a tab (an idea from Hydra's risk signals). */
-export function tabChips(tab: Pick<Tab, 'status' | 'stalled' | 'lastMerge' | 'fullAuto' | 'routing' | 'escalations' | 'ready'>): Chip[] {
+export function tabChips(tab: Pick<Tab, 'status' | 'stalled' | 'fullAuto' | 'routing' | 'escalations'>): Chip[] {
   const chips: Chip[] = [];
   if (tab.stalled && tab.status === 'running') chips.push({ label: 'stalled', tone: 'warn', title: 'No output for a while; the worker may be stuck' });
-  if (tab.lastMerge?.kind === 'conflict') chips.push({ label: 'conflict', tone: 'danger', title: `Merge conflict in ${tab.lastMerge.files.join(', ')}` });
-  if (tab.lastMerge?.kind === 'blocked') chips.push({ label: 'blocked', tone: 'warn', title: `Merge blocked: ${tab.lastMerge.reason}` });
-  if (tab.ready) chips.push({ label: 'ready', tone: 'ok', title: 'The branch is committed and yours to merge' });
   if (tab.routing?.shiftedFrom) chips.push({ label: 'rerouted', tone: 'warn', title: tab.routing.reason ?? `Routed away from the ${tab.routing.shiftedFrom} tier` });
   if (tab.escalations > 0) chips.push({ label: tab.escalations === 1 ? 'escalated' : `escalated ×${tab.escalations}`, tone: 'accent', title: 'Handed up a tier after a failure' });
   if (tab.fullAuto) chips.push({ label: 'full auto', tone: 'danger', title: 'Runs without the command allow-list' });

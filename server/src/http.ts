@@ -7,8 +7,7 @@ import type { SettingsStore } from './config/settings.js';
 import type { PricingStore, PriceTable } from './ledger/pricing.js';
 import { isAllowedOrigin } from './origin.js';
 import type { SubmitMode, TaskEngine } from './tasks/engine.js';
-import { runGit } from './worktrees/git.js';
-import { WorktreeManager, type WorktreeOps } from './worktrees/manager.js';
+import { defaultBranch, runGit } from './worktrees/git.js';
 import { attachWebSocket } from './ws.js';
 
 export interface ServerDeps {
@@ -18,7 +17,6 @@ export interface ServerDeps {
   health: () => Promise<Record<Provider, CliHealth>>;
   /** Built client to serve at `/`; API only when omitted. */
   clientDist?: string;
-  worktreesFor?: (root: string) => WorktreeOps;
 }
 
 export interface CouncilServer {
@@ -99,7 +97,6 @@ const CONTENT_TYPES: Record<string, string> = {
 
 export function createServer(deps: ServerDeps): CouncilServer {
   const { engine } = deps;
-  const worktreesFor = deps.worktreesFor ?? ((root: string) => new WorktreeManager(root));
 
   async function api(method: string, url: URL, req: http.IncomingMessage): Promise<{ status: number; body: unknown }> {
     const parts = url.pathname.split('/').filter(Boolean); // ['api', ...]
@@ -136,13 +133,13 @@ export function createServer(deps: ServerDeps): CouncilServer {
         const root = path.resolve(top.stdout.trim());
         await deps.settings.addRecentProject(root);
         const tabs = await engine.loadProject(root);
-        let defaultBranch: string | null = null;
+        let branch: string | null = null;
         try {
-          defaultBranch = await worktreesFor(root).defaultBranch();
+          branch = await defaultBranch(root);
         } catch {
           /* reported as null */
         }
-        return { status: 200, body: { projectId: engine.projectIdFor(root), root, defaultBranch, tabs } };
+        return { status: 200, body: { projectId: engine.projectIdFor(root), root, defaultBranch: branch, tabs } };
       }
     }
 
@@ -180,12 +177,8 @@ export function createServer(deps: ServerDeps): CouncilServer {
               return { status: 200, body: await engine.escalate(id) };
             case 'switch':
               return { status: 200, body: await engine.switchWorker(id, provider(body.provider), modelOf(body.model)) };
-            case 'merge':
-              return { status: 200, body: await engine.merge(id) };
-            case 'rebase':
-              return { status: 200, body: await engine.askRebase(id) };
             case 'close':
-              return { status: 200, body: await engine.close(id, { deleteWorktree: body.deleteWorktree === true }) };
+              return { status: 200, body: await engine.close(id) };
             default:
               break;
           }

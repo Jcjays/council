@@ -23,8 +23,6 @@ function hintFor(tab: Tab): string {
       return 'Start the worker from the vote card above.';
     case 'handing-off':
       return 'Handing the task over…';
-    case 'merged':
-      return 'This tab is merged. Open a new tab for more work.';
     case 'closed':
       return 'This tab is closed.';
     default:

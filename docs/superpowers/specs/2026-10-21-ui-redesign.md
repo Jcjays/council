@@ -9,6 +9,16 @@ Reference material: a static mockup of the proposed screens in light and dark is
 `2026-10-21-ui-redesign-mockup.html` (open it in a browser). The earlier product design is
 `2026-10-20-council-design.md`; nothing here changes the server, its REST API or WebSocket messages.
 
+Revised later the same day after two pieces of feedback from Chris:
+
+- **No worktrees, branches or merges in the UI.** Workers edit the project checkout directly, commit nothing, and
+  follow the project's CLAUDE.md / AGENTS.md / GEMINI.md; the developer reviews the changes in their editor or git.
+  The branch chips, Merge and rebase buttons, the "remove the worktree" option and the details pane's Branch section
+  are gone (the mockup still shows them; it predates this). The third step reads "Review".
+- **Settings is one simple page.** Monthly budgets, who does what, council seats and the two toggles; everything else
+  (warn %, reset day, seat timeout, cost ceiling, stall minutes, allowed commands, model lists, prices, CLI health)
+  sits behind a collapsed Advanced section. The save bar shows "Unsaved changes" and tints amber until Save.
+
 ## What the two projects do, in one line each
 
 - **Hydra** (mikecubed/Hydra, fork of PrimeLocus/Hydra): an event-sourced daemon that routes prompts to Gemini, Codex,

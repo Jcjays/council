@@ -22,8 +22,8 @@ export function Steps() {
         <span>The cheapest worker for that tier gets it: Gemini, Codex or Claude.</span>
       </div>
       <div className="step">
-        <b>3 · Worktree</b>
-        <span>It works on its own branch; you merge when it is done.</span>
+        <b>3 · Review</b>
+        <span>The changes land in your checkout, uncommitted. Look them over in your editor or git.</span>
       </div>
     </div>
   );
@@ -52,8 +52,8 @@ export function Home({ projects, project, openTabs, onOpenProject, onNewTab }: P
             <h2>{openTabs > 0 ? 'Pick a tab, or start another' : 'Start the first task'}</h2>
             <p className="lead">
               {openTabs > 0
-                ? `${basename(project.root)} has ${openTabs} open tab${openTabs === 1 ? '' : 's'} in the sidebar. Each one is a task with its own worker and git worktree.`
-                : `Create a tab, describe the task, and the council routes it to the cheapest agent that can handle it.`}
+                ? `${basename(project.root)} has ${openTabs} open tab${openTabs === 1 ? '' : 's'} in the sidebar. Each one is a task with its own worker, editing this checkout in place.`
+                : `Create a tab, describe the task, and the council routes it to the cheapest agent that can handle it. Workers follow the project's CLAUDE.md, AGENTS.md or GEMINI.md.`}
             </p>
             <div className="row">
               <button className="primary" onClick={onNewTab}>
@@ -68,7 +68,7 @@ export function Home({ projects, project, openTabs, onOpenProject, onNewTab }: P
         ) : (
           <>
             <h2>Get started</h2>
-            <p className="lead">Open a git checkout. Council keeps a branch and worktree per task inside it, so several agents can work on the same project at once.</p>
+            <p className="lead">Open a git checkout. Each tab puts one agent to work in it, following the project's CLAUDE.md, AGENTS.md or GEMINI.md; nothing is committed, so you review the changes as you would your own.</p>
             <div className="card">
               <form
                 className="row"
