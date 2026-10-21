@@ -5,16 +5,15 @@ Date: 2026-10-21. Builder: Claude (session silly-bohr). Status: proposal, built 
 Chris asked: "work on its UI. Get ideas from these projects: Hydra and agent-orchestrator." This file records
 which ideas transfer and why, the design that follows from them, and what stays as it is.
 
-Reference material: a static mockup of the proposed screens in light and dark is next to this file,
-`2026-10-21-ui-redesign-mockup.html` (open it in a browser). The earlier product design is
-`2026-10-20-council-design.md`; nothing here changes the server, its REST API or WebSocket messages.
+The earlier product design is `2026-10-20-council-design.md`; nothing here changes the server, its REST API or
+WebSocket messages. (A static mockup page accompanied the first draft; it was removed once the real screens existed.)
 
 Revised later the same day after two pieces of feedback from Chris:
 
 - **No worktrees, branches or merges in the UI.** Workers edit the project checkout directly, commit nothing, and
   follow the project's CLAUDE.md / AGENTS.md / GEMINI.md; the developer reviews the changes in their editor or git.
   The branch chips, Merge and rebase buttons, the "remove the worktree" option and the details pane's Branch section
-  are gone (the mockup still shows them; it predates this). The third step reads "Review".
+  are gone. The third step reads "Review".
 - **Settings is owned by another session** ("council-settings"), which is replacing the price table, model lists,
   allowed commands and dollar budgets with automatic detection. This branch leaves `Settings.tsx` and `Health.tsx`
   as they are on main and only styles them so they sit in the new shell. Chris asked for the page to be simple, with
