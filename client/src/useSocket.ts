@@ -5,6 +5,7 @@ export interface SocketHandlers {
   onHello: (tabs: Tab[], budgets: Record<Provider, BudgetState> | null) => void;
   onTab: (tab: Tab) => void;
   onItem: (tabId: string, item: TranscriptItem) => void;
+  onStall?: (tabId: string) => void;
   onBudgets: (budgets: Record<Provider, BudgetState>) => void;
 }
 
@@ -45,6 +46,7 @@ export function useSocket(handlers: SocketHandlers): boolean {
         if (msg.type === 'hello') h.onHello(msg.tabs, msg.budgets);
         else if (msg.type === 'tab') h.onTab(msg.tab);
         else if (msg.type === 'item') h.onItem(msg.tabId, msg.item);
+        else if (msg.type === 'stall') h.onStall?.(msg.tabId);
         else if (msg.type === 'budgets') h.onBudgets(msg.budgets);
       };
       socket.onclose = () => {
