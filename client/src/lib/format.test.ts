@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { basename, budgetTone, costSource, daysLeft, elapsed, formatTokens, formatUsd, relativeTime, statusLabel, workerLabel } from './format';
+import { basename, budgetTone, costSource, daysLeft, elapsed, formatTokens, formatUsd, relativeTime, shortenPath, statusLabel, workerLabel } from './format';
 
 test('formatUsd shows four decimals under a cent and two otherwise', () => {
   expect(formatUsd(0.0012)).toBe('$0.0012');
@@ -64,6 +64,14 @@ test('costSource tells reported from estimated costs apart', () => {
   expect(costSource('claude')).toBe('reported by Claude Code');
   expect(costSource('codex')).toBe('estimated from the price table');
   expect(costSource(null)).toBe('estimated from the price table');
+});
+
+test('shortenPath strips the worktree prefix in either slash style', () => {
+  expect(shortenPath('C:\\w\\.worktrees\\t1\\src\\a.ts', 'C:/w/.worktrees/t1')).toBe('src/a.ts');
+  expect(shortenPath('c:/w/.worktrees/t1/README.md', 'C:\\w\\.worktrees\\t1\\')).toBe('README.md');
+  expect(shortenPath('src/a.ts', 'C:/w')).toBe('src/a.ts');
+  expect(shortenPath('C:/other/a.ts', 'C:/w')).toBe('C:/other/a.ts');
+  expect(shortenPath('npm test', null)).toBe('npm test');
 });
 
 test('basename takes the last segment of either slash style', () => {

@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { lineDiff } from '../lib/diff';
+import { shortenPath } from '../lib/format';
 import { classifyTool } from '../lib/tools';
 import type { TranscriptItem } from '../types';
 import { DiffView } from './DiffView';
@@ -15,9 +16,10 @@ function pretty(v: unknown): string {
 }
 
 /** One tool call: a one-line row by kind, expandable to the diff, the command output or the raw input. */
-export function ToolCall({ item }: { item: TranscriptItem }) {
+export function ToolCall({ item, pathBase }: { item: TranscriptItem; pathBase?: string | null }) {
   const tool = item.tool;
   const view = useMemo(() => (tool ? classifyTool(tool) : null), [tool]);
+  const subject = view ? shortenPath(view.subject, pathBase) : '';
   const [manual, setManual] = useState<boolean | null>(null);
   if (!tool || !view) return null;
 
@@ -41,7 +43,7 @@ export function ToolCall({ item }: { item: TranscriptItem }) {
         </span>
         <span className="verb">{view.verb}</span>
         <span className="subject" title={view.subject}>
-          {view.subject || <span className="muted">(no details)</span>}
+          {subject || <span className="muted">(no details)</span>}
         </span>
         {(view.kind === 'edit' || view.kind === 'write') && (counts.added > 0 || counts.removed > 0) && (
           <span className="pm">

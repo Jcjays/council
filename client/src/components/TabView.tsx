@@ -236,6 +236,7 @@ export function TabView({ tab, settings, project, stallSeq, details, onToggleDet
           <Transcript
             items={tab.transcript}
             provider={tab.worker?.provider ?? null}
+            pathBase={tab.worktree?.path ?? null}
             voteCard={tab.vote ? <VoteCard tab={tab} settings={settings} onStart={(pick) => act(() => api.start(tab.id, pick))} /> : undefined}
           />
 

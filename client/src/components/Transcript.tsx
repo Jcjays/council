@@ -38,17 +38,19 @@ interface Props {
   provider: Provider | null;
   /** The vote card, rendered where the council voted (or first, when the transcript has no vote item). */
   voteCard?: ReactNode;
+  /** The worktree path; tool paths inside it are shown relative to it. */
+  pathBase?: string | null;
 }
 
 /** The tab's transcript: user bubbles, assistant markdown, folded tool-call runs, system lines, results and errors. */
-export function Transcript({ items, provider, voteCard }: Props) {
+export function Transcript({ items, provider, voteCard, pathBase }: Props) {
   const blocks = useMemo(() => groupActivity(items), [items]);
   const hasVoteItem = items.some((i) => i.kind === 'vote');
   return (
     <>
       {voteCard && !hasVoteItem && voteCard}
       {blocks.map((b) => {
-        if (b.kind === 'run') return <ActivityRun key={b.id} block={b} />;
+        if (b.kind === 'run') return <ActivityRun key={b.id} block={b} pathBase={pathBase} />;
         const item = b.item;
         switch (item.kind) {
           case 'user':

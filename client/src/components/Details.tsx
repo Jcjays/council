@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { costSource, formatUsd, PROVIDER_NAMES } from '../lib/format';
+import { costSource, formatUsd, PROVIDER_NAMES, shortenPath } from '../lib/format';
 import { filesTouched } from '../lib/tools';
 import type { ProjectInfo, Tab, TabWorker } from '../types';
 import { Glyph } from './Glyph';
@@ -177,7 +177,7 @@ export function Details({ tab, project, busy, onMerge, onRebase, onMarkReady }: 
             {files.map((f) => (
               <div key={f.path} className="file" title={`${f.path} (${f.label})`}>
                 <span className="muted">{f.label === 'written' || f.label === 'added' ? '+' : f.label === 'deleted' ? '−' : '✎'}</span>
-                <span className="name">{f.path}</span>
+                <span className="name">{shortenPath(f.path, tab.worktree?.path)}</span>
                 {(f.added > 0 || f.removed > 0) && (
                   <span className="pm">
                     {f.added > 0 && <span className="add">+{f.added}</span>}

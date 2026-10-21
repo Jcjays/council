@@ -2,14 +2,19 @@ import { useState } from 'react';
 import { runLabel, type ActivityBlock } from '../lib/activity';
 import { ToolCall } from './ToolCall';
 
+interface Props {
+  block: Extract<ActivityBlock, { kind: 'run' }>;
+  pathBase?: string | null;
+}
+
 /** A run of consecutive tool calls folded behind one summary line; opens itself while a call is still running or after a failure. */
-export function ActivityRun({ block }: { block: Extract<ActivityBlock, { kind: 'run' }> }) {
+export function ActivityRun({ block, pathBase }: Props) {
   const [manual, setManual] = useState<boolean | null>(null);
   const s = block.summary;
   if (block.items.length === 1 && block.items[0]) {
     return (
       <div className="run">
-        <ToolCall item={block.items[0]} />
+        <ToolCall item={block.items[0]} pathBase={pathBase} />
       </div>
     );
   }
@@ -30,7 +35,7 @@ export function ActivityRun({ block }: { block: Extract<ActivityBlock, { kind: '
           </span>
         )}
       </button>
-      {open && block.items.map((it) => <ToolCall key={it.id} item={it} />)}
+      {open && block.items.map((it) => <ToolCall key={it.id} item={it} pathBase={pathBase} />)}
     </div>
   );
 }

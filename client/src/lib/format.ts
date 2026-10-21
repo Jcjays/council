@@ -98,6 +98,16 @@ export function elapsed(ms: number): string {
   return `${h}h ${String(m % 60).padStart(2, '0')}m`;
 }
 
+/** `path` relative to `base` when it lies inside it (either slash style, case-insensitive on drive letters), else unchanged. */
+export function shortenPath(p: string, base: string | null | undefined): string {
+  if (!base) return p;
+  const norm = (s: string) => s.replace(/\\/g, '/').replace(/\/+$/, '');
+  const np = norm(p);
+  const nb = norm(base);
+  const same = np.toLowerCase().startsWith(`${nb.toLowerCase()}/`);
+  return same ? np.slice(nb.length + 1) : p;
+}
+
 /** The last path segment of a checkout, for the project picker. */
 export function basename(p: string): string {
   const parts = p.replace(/[\\/]+$/, '').split(/[\\/]/);
