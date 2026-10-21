@@ -96,6 +96,14 @@ test('POST /api/pricing/refresh fetches prices and says where they came from', a
   expect(r.json.table['claude-haiku-5-5']).toEqual({ inputPerM: 0.1, cachedInputPerM: 0.01, outputPerM: 0.5 });
 });
 
+test('GET /api/models lists each provider’s ladder with labels and price badges', async () => {
+  const r = await api('GET', '/api/models');
+  expect(r.status).toBe(200);
+  expect(Object.keys(r.json).sort()).toEqual(['claude', 'codex', 'gemini']);
+  expect(r.json.claude[0]).toMatchObject({ id: 'claude-haiku-5-5', label: 'Haiku 5.5', price: { inputPerM: 0.1, outputPerM: 0.5 } });
+  expect(r.json.gemini.map((m: { id: string }) => m.id)).toEqual(['flash-lite', 'flash', 'pro']);
+});
+
 test('GET /api/routing describes the effective council and tier map', async () => {
   const r = await api('GET', '/api/routing');
   expect(r.status).toBe(200);

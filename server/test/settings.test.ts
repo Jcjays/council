@@ -48,6 +48,16 @@ test('save then load round-trips', async () => {
   expect(await loadSettings(file)).toEqual(changed);
 });
 
+test('the file keeps only what differs from the defaults, so improved defaults reach existing installs', async () => {
+  const file = tmpFile();
+  await saveSettings(file, { ...DEFAULT_SETTINGS, autoStart: true, models: { ...DEFAULT_SETTINGS.models, codex: ['gpt-6'] } });
+  const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+  expect(saved).toEqual({ autoStart: true, models: { codex: ['gpt-6'] } });
+  const loaded = await loadSettings(file);
+  expect(loaded.models.claude).toEqual(DEFAULT_SETTINGS.models.claude);
+  expect(loaded.models.codex).toEqual(['gpt-6']);
+});
+
 test('a corrupt file falls back to the defaults instead of crashing', async () => {
   const file = tmpFile();
   fs.writeFileSync(file, '{ not json');

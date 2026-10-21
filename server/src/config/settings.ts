@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { Provider } from '../adapters/types.js';
 import type { Seat } from '../council/council.js';
 import type { TierMap } from '../council/routing.js';
+import { ladderIds } from './models.js';
 
 export type ProjectOverride = Partial<Pick<Settings, 'allowedCommands' | 'autoStart' | 'autoEscalate'>>;
 
@@ -68,11 +69,7 @@ export const DEFAULT_SETTINGS: Settings = {
     'Bash(pytest*)',
     'Bash(dotnet *)',
   ],
-  models: {
-    claude: ['claude-haiku-5-5', 'claude-sonnet-5-5', 'claude-opus-5-5', 'claude-fable-5-1'],
-    codex: ['gpt-5.1-codex-mini', 'gpt-5.1-codex', 'gpt-5.5'],
-    gemini: ['flash-lite', 'flash', 'pro'],
-  },
+  models: ladderIds(),
   recentProjects: [],
   projectOverrides: {},
 };
@@ -113,9 +110,28 @@ export async function loadSettings(file: string): Promise<Settings> {
   }
 }
 
+/**
+ * What differs from `base`; record-valued keys are compared entry by entry. The
+ * settings file stores only this, so a better default reaches existing installs.
+ */
+export function settingsDiff(settings: Settings, base: Settings = DEFAULT_SETTINGS): Partial<Settings> {
+  const out: Record<string, unknown> = {};
+  const defaults = base as unknown as Record<string, unknown>;
+  for (const [key, value] of Object.entries(settings)) {
+    const def = defaults[key];
+    if (isObject(def) && isObject(value)) {
+      const changed = Object.entries(value).filter(([k, v]) => JSON.stringify(v) !== JSON.stringify(def[k]));
+      if (changed.length > 0) out[key] = Object.fromEntries(changed);
+    } else if (JSON.stringify(value) !== JSON.stringify(def)) {
+      out[key] = value;
+    }
+  }
+  return out as Partial<Settings>;
+}
+
 export async function saveSettings(file: string, settings: Settings): Promise<void> {
   await fs.mkdir(path.dirname(file), { recursive: true });
-  await fs.writeFile(file, `${JSON.stringify(settings, null, 2)}\n`, 'utf8');
+  await fs.writeFile(file, `${JSON.stringify(settingsDiff(settings), null, 2)}\n`, 'utf8');
 }
 
 export function effectiveSettings(settings: Settings, projectId: string): Settings {

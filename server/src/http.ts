@@ -3,6 +3,7 @@ import http from 'node:http';
 import path from 'node:path';
 import type { WebSocketServer } from 'ws';
 import { PROVIDERS, type CliHealth, type Provider } from './adapters/types.js';
+import { modelCatalog } from './config/models.js';
 import type { SettingsStore } from './config/settings.js';
 import type { PricingStore, PriceTable } from './ledger/pricing.js';
 import { isAllowedOrigin } from './origin.js';
@@ -115,6 +116,8 @@ export function createServer(deps: ServerDeps): CouncilServer {
       if (!id && method === 'PUT') return { status: 200, body: await deps.pricing.setOverrides(body as PriceTable) };
       if (id === 'refresh' && method === 'POST') return { status: 200, body: await deps.pricing.refresh() };
     }
+
+    if (resource === 'models' && method === 'GET') return { status: 200, body: modelCatalog(deps.settings.get().models, deps.pricing.get()) };
 
     if (resource === 'budgets' && method === 'GET') return { status: 200, body: await engine.budgets() };
 
