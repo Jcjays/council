@@ -26,8 +26,8 @@ function TabRow({ tab, selected, onSelect, now }: { tab: Tab; selected: boolean;
       </span>
       <span className="meta">
         {tab.worker && <Glyph provider={tab.worker.provider} />}
-        {tab.worker?.model && <span>{tab.worker.model}</span>}
-        <span>{statusPhrase(tab, now)}</span>
+        <span className="phrase">{statusPhrase(tab, now)}</span>
+        {tab.worker?.model && <span title={tab.worker.model}>· {tab.worker.model}</span>}
       </span>
       <span className="right">
         {chip ? (

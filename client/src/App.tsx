@@ -13,6 +13,18 @@ import { useSocket } from './useSocket';
 
 const DETAILS_KEY = 'council.details';
 
+/** `#tab=<id>` or `#settings`, so a reload or a shared link lands on the same place. */
+function readHash(): { tab?: string; settings?: boolean } {
+  const h = location.hash.replace(/^#/, '');
+  if (h === 'settings') return { settings: true };
+  const m = /^tab=([\w-]+)$/.exec(h);
+  return m?.[1] ? { tab: m[1] } : {};
+}
+
+function writeHash(next: string) {
+  if (location.hash !== next) history.replaceState(null, '', next || location.pathname + location.search);
+}
+
 function readDetailsPref(): boolean {
   try {
     const v = localStorage.getItem(DETAILS_KEY);
@@ -30,7 +42,9 @@ export function App() {
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
   const [project, setProject] = useState<ProjectInfo | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [view, setView] = useState<'tabs' | 'settings'>('tabs');
+  const [view, setView] = useState<'tabs' | 'settings'>(() => (readHash().settings ? 'settings' : 'tabs'));
+  /** A tab id from the URL hash, honoured once that tab is known. */
+  const [wantedTab, setWantedTab] = useState<string | null>(() => readHash().tab ?? null);
   const [error, setError] = useState<string | null>(null);
   const [help, setHelp] = useState(false);
   const [details, setDetails] = useState(readDetailsPref);
@@ -63,9 +77,20 @@ export function App() {
     setProject({ root: info.root, projectId: info.projectId, defaultBranch: info.defaultBranch });
     setTabs((prev) => ({ ...prev, ...Object.fromEntries(info.tabs.map((t) => [t.id, t])) }));
     setProjects(await api.projects());
-    setSelectedId(null);
-    setView('tabs');
+    // Keep the selection when it belongs to the project just opened (a reload, or re-opening the same checkout).
+    setSelectedId((cur) => (cur && info.tabs.some((t) => t.id === cur) ? cur : null));
   }, []);
+
+  useEffect(() => {
+    if (wantedTab && tabs[wantedTab]) {
+      setSelectedId(wantedTab);
+      setWantedTab(null);
+    }
+  }, [wantedTab, tabs]);
+
+  useEffect(() => {
+    writeHash(view === 'settings' ? '#settings' : selectedId ? `#tab=${selectedId}` : '');
+  }, [view, selectedId]);
 
   useEffect(() => {
     api.settings().then(setSettings).catch((e: Error) => onError(e.message));
@@ -168,6 +193,7 @@ export function App() {
         onOpenProject={async (p) => {
           try {
             await openProject(p);
+            setView('tabs');
           } catch (err) {
             onError((err as Error).message);
           }

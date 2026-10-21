@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import { groupActivity } from '../lib/activity';
 import { costSource, formatTokens, formatUsd, shortTime } from '../lib/format';
 import type { Provider, TranscriptItem, Usage } from '../types';
@@ -36,15 +36,17 @@ interface Props {
   items: TranscriptItem[];
   /** The tab's worker provider, for cost tooltips. */
   provider: Provider | null;
-  /** The council's decision, for the vote marker. */
-  decision?: string | null;
+  /** The vote card, rendered where the council voted (or first, when the transcript has no vote item). */
+  voteCard?: ReactNode;
 }
 
 /** The tab's transcript: user bubbles, assistant markdown, folded tool-call runs, system lines, results and errors. */
-export function Transcript({ items, provider, decision }: Props) {
+export function Transcript({ items, provider, voteCard }: Props) {
   const blocks = useMemo(() => groupActivity(items), [items]);
+  const hasVoteItem = items.some((i) => i.kind === 'vote');
   return (
     <>
+      {voteCard && !hasVoteItem && voteCard}
       {blocks.map((b) => {
         if (b.kind === 'run') return <ActivityRun key={b.id} block={b} />;
         const item = b.item;
@@ -63,9 +65,11 @@ export function Transcript({ items, provider, decision }: Props) {
               </div>
             );
           case 'vote':
-            return (
+            return voteCard ? (
+              <div key={item.id}>{voteCard}</div>
+            ) : (
               <div key={item.id} className="item-system">
-                Council voted{decision ? `: ${decision}` : ''}.
+                Council voted.
               </div>
             );
           case 'system':

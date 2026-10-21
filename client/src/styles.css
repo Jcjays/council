@@ -497,6 +497,9 @@ kbd {
   height: 100vh;
   overflow: hidden;
 }
+.app > * {
+  min-width: 0;
+}
 .content {
   display: flex;
   flex-direction: column;
@@ -694,6 +697,9 @@ kbd {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.trow .meta > .phrase {
+  flex: none;
+}
 .trow .right {
   grid-column: 3;
   grid-row: 2;
@@ -875,6 +881,9 @@ kbd {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+.alerts:not(:empty) {
+  padding: 10px 18px 0;
 }
 .inline-form {
   flex-direction: row;

@@ -116,8 +116,7 @@ export function TabView({ tab, settings, project, stallSeq, details, onToggleDet
           </div>
         </header>
 
-        <div className="stream" ref={streamRef}>
-          <div className="alerts">
+        <div className="alerts">
             {switching && settled && (
               <div className="card inline-form">
                 <span>Hand this tab to</span>
@@ -223,8 +222,9 @@ export function TabView({ tab, settings, project, stallSeq, details, onToggleDet
                 </div>
               </div>
             )}
-          </div>
+        </div>
 
+        <div className="stream" ref={streamRef}>
           {drafting && (
             <div className="draft-intro">
               <h3>What should the council work on?</h3>
@@ -233,9 +233,11 @@ export function TabView({ tab, settings, project, stallSeq, details, onToggleDet
             </div>
           )}
 
-          <VoteCard tab={tab} settings={settings} onStart={(pick) => act(() => api.start(tab.id, pick))} />
-
-          <Transcript items={tab.transcript} provider={tab.worker?.provider ?? null} decision={tab.vote?.decision ?? null} />
+          <Transcript
+            items={tab.transcript}
+            provider={tab.worker?.provider ?? null}
+            voteCard={tab.vote ? <VoteCard tab={tab} settings={settings} onStart={(pick) => act(() => api.start(tab.id, pick))} /> : undefined}
+          />
 
           {!pinned && (
             <div className="stream-anchor">

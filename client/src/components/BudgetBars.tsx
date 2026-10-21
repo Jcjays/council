@@ -32,8 +32,8 @@ export function BudgetBars({ budgets, resetDay }: { budgets: Record<Provider, Bu
           </div>
         );
       })}
-      <div className="legend">
-        {left} day{left === 1 ? '' : 's'} until reset · lighter segment is council votes
+      <div className="legend" title="The lighter end of each bar is what council votes and hand-off summaries cost">
+        {left} day{left === 1 ? '' : 's'} to reset · lighter = council votes
       </div>
     </section>
   );
