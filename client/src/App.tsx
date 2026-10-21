@@ -83,11 +83,13 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (wantedTab && tabs[wantedTab]) {
-      setSelectedId(wantedTab);
-      setWantedTab(null);
-    }
-  }, [wantedTab, tabs]);
+    const wanted = wantedTab ? tabs[wantedTab] : undefined;
+    if (!wanted || !project) return;
+    setSelectedId(wanted.id);
+    setWantedTab(null);
+    // A link into another project's tab brings that project's sidebar with it.
+    if (wanted.projectId !== project.projectId) openProject(wanted.projectRoot).catch((e: Error) => onError(e.message));
+  }, [wantedTab, tabs, project, openProject, onError]);
 
   useEffect(() => {
     writeHash(view === 'settings' ? '#settings' : selectedId ? `#tab=${selectedId}` : '');
