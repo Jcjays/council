@@ -10,11 +10,13 @@ interface Props {
   tab: Tab;
   settings: Settings;
   onError: (message: string) => void;
+  available?: Provider[];
 }
 
-export function TabView({ tab, settings, onError }: Props) {
+export function TabView({ tab, settings, onError, available }: Props) {
+  const providers = PROVIDERS.filter((p) => !available || available.includes(p));
   const [switching, setSwitching] = useState(false);
-  const [switchProvider, setSwitchProvider] = useState<Provider>('claude');
+  const [switchProvider, setSwitchProvider] = useState<Provider>(providers[0] ?? 'claude');
   const [switchModel, setSwitchModel] = useState('');
   const [closing, setClosing] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -70,7 +72,7 @@ export function TabView({ tab, settings, onError }: Props) {
         <div className="card row wrap">
           <span>Hand this tab to</span>
           <select value={switchProvider} onChange={(e) => setSwitchProvider(e.target.value as Provider)} aria-label="Switch provider">
-            {PROVIDERS.map((p) => (
+            {providers.map((p) => (
               <option key={p} value={p}>
                 {PROVIDER_NAMES[p]}
               </option>
@@ -121,13 +123,14 @@ export function TabView({ tab, settings, onError }: Props) {
         </div>
       )}
 
-      <VoteCard tab={tab} settings={settings} onStart={(pick) => act(() => api.start(tab.id, pick))} />
+      <VoteCard tab={tab} settings={settings} available={available} onStart={(pick) => act(() => api.start(tab.id, pick))} />
 
       <Transcript items={tab.transcript} />
 
       <Composer
         tab={tab}
         settings={settings}
+        available={available}
         onSubmit={(text: string, mode: SubmitMode, fullAuto: boolean) => act(() => api.submit(tab.id, text, mode, fullAuto))}
         onSend={(text: string) => act(() => api.send(tab.id, text))}
       />

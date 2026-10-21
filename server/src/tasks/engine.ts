@@ -1,10 +1,11 @@
 import { EventEmitter } from 'node:events';
-import { PROVIDERS, TIER_ORDER, type Adapter, type CliHealth, type Provider, type ResultEvent, type Tier } from '../adapters/types.js';
+import { PROVIDERS, TIER_ORDER, type Adapter, type CliHealth, type Provider, type QuotaWindow, type ResultEvent, type Tier } from '../adapters/types.js';
 import { effectiveSettings, type Settings } from '../config/settings.js';
 import { runCouncil, type Seat } from '../council/council.js';
+import { effectiveRouting, type EffectiveRouting } from '../council/effective.js';
 import { route } from '../council/routing.js';
 import { repoSnapshot } from '../council/snapshot.js';
-import { budgetState, type BudgetState } from '../ledger/budget.js';
+import { budgetState, type BudgetState, type ProviderUsage } from '../ledger/budget.js';
 import { appendEntry, currentPeriod, readEntries, sumPeriod } from '../ledger/ledger.js';
 import { costFor, lookupPrice, type PriceTable } from '../ledger/pricing.js';
 import { diffStat as gitDiffStat } from '../worktrees/git.js';
@@ -66,6 +67,7 @@ export class TaskEngine extends EventEmitter {
   private readonly tabs = new Map<string, Tab>();
   private readonly runs = new Map<string, ActiveRun>();
   private readonly saveTimers = new Map<string, NodeJS.Timeout>();
+  private readonly usageByProvider: Partial<Record<Provider, ProviderUsage>> = {};
   private readonly now: () => Date;
 
   constructor(private readonly deps: EngineDeps) {
@@ -109,10 +111,30 @@ export class TaskEngine extends EventEmitter {
     const entries = await readEntries(this.deps.ledgerFile);
     const { start, end } = currentPeriod(this.now(), s.resetDay);
     const sums = sumPeriod(entries, start, end);
-    return Object.fromEntries(PROVIDERS.map((p) => [p, budgetState(p, sums[p], s.budgets[p] ?? 0, s.warnPct)])) as Record<
-      Provider,
-      BudgetState
-    >;
+    return Object.fromEntries(
+      PROVIDERS.map((p) => {
+        const state = budgetState(p, sums[p], s.budgets[p] ?? 0, s.warnPct);
+        const usage = this.usageByProvider[p];
+        return [p, usage ? { ...state, usage } : state];
+      }),
+    ) as Record<Provider, BudgetState>;
+  }
+
+  /** Latest plan-usage windows per provider, as their CLIs reported them during runs. */
+  usage(): Partial<Record<Provider, ProviderUsage>> {
+    return { ...this.usageByProvider };
+  }
+
+  /** The council and tier map in force given which CLIs are set up. */
+  routing(projectId?: string): EffectiveRouting {
+    const s = projectId ? effectiveSettings(this.deps.settings(), projectId) : this.deps.settings();
+    return effectiveRouting(s, this.availableProviders());
+  }
+
+  private noteUsage(provider: Provider, windows: QuotaWindow[]): void {
+    const usage: ProviderUsage = { windows, observedAt: this.now().toISOString() };
+    this.usageByProvider[provider] = usage;
+    this.emit('quota', { provider, usage });
   }
 
   // ---- commands ------------------------------------------------------------
@@ -232,8 +254,13 @@ export class TaskEngine extends EventEmitter {
     });
   }
 
+  private availableProviders(): Provider[] {
+    const unavailable = this.unavailable();
+    return PROVIDERS.filter((p) => !unavailable.includes(p));
+  }
+
   private tierFor(tab: Tab, provider: Provider): Tier | null {
-    const map = this.settingsFor(tab).tierMap;
+    const map = this.routing(tab.projectId).tierMap;
     return TIER_ORDER.find((t) => map[t].provider === provider) ?? null;
   }
 
@@ -305,10 +332,11 @@ export class TaskEngine extends EventEmitter {
 
   private async runVote(tab: Tab, task: string): Promise<void> {
     const s = this.settingsFor(tab);
+    const eff = this.routing(tab.projectId);
     const cwd = tab.projectRoot;
     const snapshot = await (this.deps.snapshot ?? repoSnapshot)(cwd);
     const result = await runCouncil({
-      seats: s.seats,
+      seats: eff.seats,
       adapters: this.deps.adapters,
       task,
       cwd,
@@ -319,15 +347,16 @@ export class TaskEngine extends EventEmitter {
       onResult: async (provider, model, ev) => {
         await this.record(tab, provider, model, 'vote', ev);
       },
+      onQuota: (provider, windows) => this.noteUsage(provider, windows),
     });
     if (isClosed(tab)) return;
 
     tab.vote = result;
-    const decision = route(result.decision, s.tierMap, await this.budgets(), this.unavailable());
+    const decision = route(result.decision, eff.tierMap, await this.budgets(), this.unavailable());
     tab.tier = decision.tier;
-    tab.routing = { shiftedFrom: decision.shiftedFrom, reason: decision.reason };
+    tab.routing = { shiftedFrom: decision.shiftedFrom, reason: decision.reason, notes: eff.notes };
     tab.worker = { provider: decision.provider, model: decision.model, sessionId: null };
-    this.addItem(tab, 'vote', undefined, { council: result, routing: decision });
+    this.addItem(tab, 'vote', undefined, { council: result, routing: decision, notes: eff.notes });
 
     if (s.autoStart) {
       tab.status = transition(tab.status, 'vote-done-autostart');
@@ -384,6 +413,9 @@ export class TaskEngine extends EventEmitter {
           case 'session':
             worker.sessionId = ev.id;
             await this.touch(tab);
+            break;
+          case 'quota':
+            this.noteUsage(worker.provider, ev.windows);
             break;
           case 'text':
             this.addItem(tab, 'assistant', ev.text);
@@ -450,16 +482,16 @@ export class TaskEngine extends EventEmitter {
 
   /** Moves the tab to handing-off and assigns the next worker. Returns the worker being replaced. */
   private async prepareHandoff(tab: Tab, reason: 'escalate' | 'switch', target?: WorkerPick): Promise<TabWorker> {
-    const s = this.settingsFor(tab);
+    const eff = this.routing(tab.projectId);
     const from = tab.worker ?? { provider: 'gemini', model: null, sessionId: null };
     let next: TabWorker;
 
     if (reason === 'escalate') {
       const idx = TIER_ORDER.indexOf(tab.tier ?? 'easy');
       const nextTier = TIER_ORDER[Math.min(idx + 1, TIER_ORDER.length - 1)] as Tier;
-      const r = route(nextTier, s.tierMap, await this.budgets(), this.unavailable());
+      const r = route(nextTier, eff.tierMap, await this.budgets(), this.unavailable());
       tab.tier = r.tier;
-      tab.routing = { shiftedFrom: r.shiftedFrom, reason: r.reason };
+      tab.routing = { shiftedFrom: r.shiftedFrom, reason: r.reason, notes: eff.notes };
       tab.escalations += 1;
       next = { provider: r.provider, model: r.model, sessionId: null };
     } else {
@@ -526,6 +558,7 @@ export class TaskEngine extends EventEmitter {
       });
       for await (const ev of events) {
         if (ev.type === 'text') text += ev.text;
+        if (ev.type === 'quota') this.noteUsage(seat.provider, ev.windows);
         if (ev.type === 'result') {
           await this.record(tab, seat.provider, seat.model, 'summarize', ev);
           if (ev.isError) return mechanicalSummary(tab.transcript);

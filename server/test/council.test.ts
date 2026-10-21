@@ -128,6 +128,20 @@ test('a seat whose CLI fails is no vote and carries the failure text', async () 
   expect(r.decision).toBe('easy');
 });
 
+test('quota events from seats are reported through onQuota', async () => {
+  const windows = [{ name: '5-hour', usedPct: 0.2 }];
+  const gemini = new FakeAdapter('gemini', { events: [{ type: 'quota', windows }, ...voteEvents('easy')] });
+  const quotas: [Provider, unknown][] = [];
+  const { promise } = run(gemini, new FakeAdapter('codex', { events: voteEvents('easy') }), new FakeAdapter('claude', { events: voteEvents('easy') }), {
+    onQuota: (provider, w) => {
+      quotas.push([provider, w]);
+    },
+  });
+  const r = await promise;
+  expect(r.decision).toBe('easy');
+  expect(quotas).toEqual([['gemini', windows]]);
+});
+
 test('no seats yields medium with an empty seat list', async () => {
   const r = await runCouncil({
     seats: [],

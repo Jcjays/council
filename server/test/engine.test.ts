@@ -258,14 +258,29 @@ test('a silent worker trips the stall flag once, and output clears it', async ()
   expect(idle.stalled).toBe(false);
 });
 
-test('an unavailable provider is routed around', async () => {
-  const { engine } = setup({ health: { gemini: false } });
+test('an unavailable provider drops out of the council and its tier is served by the nearest one', async () => {
+  const { engine } = setup({ health: { gemini: false }, adapters: { claude: scripted('claude', 'easy') } });
+  const tab = await engine.createTab('C:/proj', 't');
+  await engine.submit(tab.id, 'tiny change', { kind: 'auto' });
+  const voted = await waitFor(engine, tab.id, ['awaiting-start']);
+  expect(voted.vote?.seats.map((s) => s.seat.provider)).toEqual(['codex', 'claude']);
+  expect(voted.vote?.decision).toBe('easy');
+  expect(voted.tier).toBe('easy');
+  expect(voted.worker).toMatchObject({ provider: 'codex', model: 'gpt-5.1-codex-mini' });
+  expect(voted.routing?.shiftedFrom).toBeUndefined();
+  expect(voted.routing?.notes?.join(' ')).toMatch(/gemini/i);
+});
+
+test('an exhausted budget still shifts the tier even when every CLI is set up', async () => {
+  const { engine } = setup({ settings: { budgets: { claude: 40, codex: 30, gemini: 0.0001 } } });
+  const first = await engine.createTab('C:/proj', 'warm-up');
+  await engine.submit(first.id, 'x', { kind: 'auto' });
+  await waitFor(engine, first.id, ['awaiting-start']);
   const tab = await engine.createTab('C:/proj', 't');
   await engine.submit(tab.id, 'tiny change', { kind: 'auto' });
   const voted = await waitFor(engine, tab.id, ['awaiting-start']);
   expect(voted.vote?.decision).toBe('easy');
   expect(voted.tier).toBe('medium');
-  expect(voted.worker?.provider).toBe('codex');
   expect(voted.routing).toMatchObject({ shiftedFrom: 'easy', reason: expect.stringContaining('gemini') });
 });
 
@@ -312,6 +327,44 @@ test('streaming many events emits few full-tab updates and clips oversized tool 
   const toolItem = idle.transcript.find((i) => i.kind === 'tool');
   expect((toolItem?.tool?.output ?? '').length).toBeLessThan(25_000);
   expect(idle.transcript.filter((i) => i.kind === 'assistant')).toHaveLength(40);
+});
+
+test('usage windows reported by a CLI are kept per provider and exposed with the budgets', async () => {
+  const windows = [{ name: '5-hour', usedPct: 0.59, resetsAt: '2026-10-21T04:30:00.000Z' }];
+  const events: AdapterEvent[] = [{ type: 'session', id: 's' }, { type: 'quota', windows }, ...workEvents().slice(1)];
+  const claude = new FakeAdapter('claude', (opts: RunOptions) => (opts.purpose === 'vote' ? { events: voteEvents('hard') } : { events }));
+  const { engine } = setup({ settings: { autoStart: true }, adapters: { claude } });
+  const seen: string[] = [];
+  engine.on('quota', ({ provider }: { provider: Provider }) => seen.push(provider));
+  const tab = await engine.createTab('C:/proj', 't');
+  await engine.submit(tab.id, 'x', { kind: 'manual', provider: 'claude', model: null });
+  await waitFor(engine, tab.id, ['idle']);
+  expect(seen).toEqual(['claude']);
+  expect(engine.usage().claude).toMatchObject({ windows, observedAt: expect.any(String) });
+  const b = await engine.budgets();
+  expect(b.claude.usage?.windows).toEqual(windows);
+  expect(b.gemini.usage).toBeUndefined();
+});
+
+test('with only Claude set up, the council is Haiku alone and escalation climbs Claude models', async () => {
+  const claude = scripted('claude', 'easy');
+  const { engine } = setup({ health: { gemini: false, codex: false }, adapters: { claude } });
+  expect(engine.routing()).toMatchObject({ available: ['claude'], seats: [{ provider: 'claude', model: 'claude-haiku-5-5' }] });
+  const tab = await engine.createTab('C:/proj', 't');
+  await engine.submit(tab.id, 'small thing', { kind: 'auto' });
+  const voted = await waitFor(engine, tab.id, ['awaiting-start']);
+  expect(voted.vote?.seats.map((s) => s.seat)).toEqual([{ provider: 'claude', model: 'claude-haiku-5-5' }]);
+  expect(voted.worker).toMatchObject({ provider: 'claude', model: 'claude-haiku-5-5' });
+  expect(voted.tier).toBe('easy');
+  expect(voted.routing?.notes?.join(' ')).toMatch(/only claude/i);
+  await engine.start(tab.id);
+  await waitFor(engine, tab.id, ['idle']);
+  await engine.escalate(tab.id);
+  const escalated = await waitFor(engine, tab.id, ['idle']);
+  expect(escalated.tier).toBe('medium');
+  expect(escalated.worker).toMatchObject({ provider: 'claude', model: 'claude-sonnet-5-5' });
+  const calls = claude.calls.filter((c) => c.purpose === 'work');
+  expect(calls.map((c) => c.model)).toEqual(['claude-haiku-5-5', 'claude-sonnet-5-5']);
 });
 
 test('budgets reflect the ledger against the configured limits', async () => {

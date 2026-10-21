@@ -61,7 +61,7 @@ export interface Tab {
   worker: TabWorker | null;
   previousWorkers: TabWorker[];
   vote: CouncilResult | null;
-  routing: { shiftedFrom?: Tier; reason?: string } | null;
+  routing: { shiftedFrom?: Tier; reason?: string; notes?: string[] } | null;
   transcript: TranscriptItem[];
   costUsd: number;
   fullAuto: boolean;
@@ -71,7 +71,19 @@ export interface Tab {
   updatedAt: string;
 }
 
+export interface QuotaWindow {
+  name: string;
+  usedPct: number;
+  resetsAt?: string;
+}
+
+export interface ProviderUsage {
+  windows: QuotaWindow[];
+  observedAt: string;
+}
+
 export interface BudgetState {
+  usage?: ProviderUsage;
   provider: Provider;
   spent: number;
   routingSpent: number;
@@ -111,6 +123,14 @@ export interface Settings {
   models: Record<Provider, string[]>;
   recentProjects: string[];
   projectOverrides: Record<string, Partial<Pick<Settings, 'allowedCommands' | 'autoStart' | 'autoEscalate'>>>;
+}
+
+/** The council and tier map in force given which CLIs are installed and signed in. */
+export interface EffectiveRouting {
+  available: Provider[];
+  seats: Seat[];
+  tierMap: Record<Tier, Seat>;
+  notes: string[];
 }
 
 export interface ProjectInfo {

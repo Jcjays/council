@@ -117,6 +117,10 @@ export function createServer(deps: ServerDeps): CouncilServer {
 
     if (resource === 'budgets' && method === 'GET') return { status: 200, body: await engine.budgets() };
 
+    if (resource === 'routing' && method === 'GET') {
+      return { status: 200, body: engine.routing(url.searchParams.get('projectId') ?? undefined) };
+    }
+
     if (resource === 'projects') {
       if (method === 'GET') {
         return {

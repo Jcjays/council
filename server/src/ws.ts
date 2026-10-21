@@ -56,7 +56,7 @@ export function attachWebSocket(server: http.Server, engine: TaskEngine): WebSoc
   engine.on('stall', ({ tabId }: { tabId: string }) => broadcast({ type: 'stall', tabId }));
 
   let budgetTimer: NodeJS.Timeout | undefined;
-  engine.on('ledger', () => {
+  const budgetsSoon = () => {
     if (budgetTimer) clearTimeout(budgetTimer);
     budgetTimer = setTimeout(() => {
       engine
@@ -64,7 +64,9 @@ export function attachWebSocket(server: http.Server, engine: TaskEngine): WebSoc
         .then((budgets) => broadcast({ type: 'budgets', budgets }))
         .catch(() => {});
     }, 300);
-  });
+  };
+  engine.on('ledger', budgetsSoon);
+  engine.on('quota', budgetsSoon);
 
   return wss;
 }

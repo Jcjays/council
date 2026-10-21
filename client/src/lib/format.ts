@@ -49,6 +49,24 @@ export function statusLabel(status: TabStatus): string {
   return STATUS_LABELS[status];
 }
 
+/** "5-hour window: 59% used, resets in 2h 10m" */
+export function describeWindow(w: { name: string; usedPct: number; resetsAt?: string }, now: Date = new Date()): string {
+  let text = `${w.name} window: ${Math.round(w.usedPct * 100)}% used`;
+  if (w.resetsAt) {
+    const ms = new Date(w.resetsAt).getTime() - now.getTime();
+    if (Number.isNaN(ms)) return text;
+    if (ms <= 0) return `${text}, resets now`;
+    let hours = Math.floor(ms / 3_600_000);
+    let minutes = Math.round((ms % 3_600_000) / 60_000);
+    if (minutes === 60) {
+      hours += 1;
+      minutes = 0;
+    }
+    text += `, resets in ${hours > 0 ? `${hours}h ` : ''}${minutes}m`;
+  }
+  return text;
+}
+
 export function shortTime(iso: string): string {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });

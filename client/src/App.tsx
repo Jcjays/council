@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from './api';
+import { Health } from './components/Health';
 import { Settings } from './components/Settings';
 import { Sidebar } from './components/Sidebar';
 import { TabView } from './components/TabView';
-import type { BudgetState, CliHealth, ProjectInfo, Provider, Settings as SettingsT, Tab, TranscriptItem } from './types';
+import type { BudgetState, CliHealth, EffectiveRouting, ProjectInfo, Provider, Settings as SettingsT, Tab, TranscriptItem } from './types';
 import { useSocket } from './useSocket';
 
 export function App() {
@@ -11,6 +12,7 @@ export function App() {
   const [budgets, setBudgets] = useState<Record<Provider, BudgetState> | null>(null);
   const [settings, setSettings] = useState<SettingsT | null>(null);
   const [health, setHealth] = useState<Record<Provider, CliHealth> | null>(null);
+  const [routing, setRouting] = useState<EffectiveRouting | null>(null);
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
   const [project, setProject] = useState<ProjectInfo | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -46,7 +48,13 @@ export function App() {
 
   useEffect(() => {
     api.settings().then(setSettings).catch((e: Error) => onError(e.message));
-    api.health().then(setHealth).catch(() => setHealth(null));
+    api
+      .health()
+      .then((h) => {
+        setHealth(h);
+        return api.routing().then(setRouting);
+      })
+      .catch(() => setHealth(null));
     api.budgets().then(setBudgets).catch(() => {});
     api
       .projects()
@@ -99,6 +107,7 @@ export function App() {
         onNewTab={() => void newTab()}
         budgets={budgets}
         resetDay={settings?.resetDay ?? 1}
+        available={routing?.available ?? null}
         view={view}
         onView={setView}
         connected={connected}
@@ -114,12 +123,24 @@ export function App() {
         )}
         {view === 'settings' && settings ? (
           <Settings settings={settings} onSaved={setSettings} health={health} onError={onError} />
+        ) : routing && routing.available.length === 0 ? (
+          <main className="empty">
+            <h2>Set up a coding CLI first</h2>
+            <p>Council drives Claude Code, Codex CLI and Gemini CLI. None of them is installed and signed in on this machine yet, so there is nothing to route a task to.</p>
+            <Health health={health} />
+            <p className="muted small">Install one, sign in, then reload this page. One is enough: with a single provider the council uses its cheapest model and the tiers climb that provider's own models.</p>
+          </main>
         ) : selected && settings ? (
-          <TabView tab={selected} settings={settings} onError={onError} />
+          <TabView tab={selected} settings={settings} onError={onError} available={routing?.available} />
         ) : (
           <main className="empty">
             <h2>Council</h2>
             <p>Open a project on the left, create a tab, and describe a task. The council votes on how hard it is and hands it to the cheapest capable agent, which works directly in your checkout and follows the project's CLAUDE.md, AGENTS.md or GEMINI.md. Nothing is committed; review the changes in your editor or git.</p>
+            {routing?.notes.map((n) => (
+              <p key={n} className="muted small">
+                {n}
+              </p>
+            ))}
             {!project && projects.length === 0 && <p className="muted">Paste the path of a git checkout to begin.</p>}
           </main>
         )}

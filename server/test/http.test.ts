@@ -81,6 +81,15 @@ test('GET /api/pricing returns the table and PUT replaces an entry', async () =>
   expect(put.json.pro).toBeDefined();
 });
 
+test('GET /api/routing describes the effective council and tier map', async () => {
+  const r = await api('GET', '/api/routing');
+  expect(r.status).toBe(200);
+  expect(r.json.available).toBeInstanceOf(Array);
+  expect(r.json.seats).toBeInstanceOf(Array);
+  expect(Object.keys(r.json.tierMap).sort()).toEqual(['easy', 'hard', 'medium']);
+  expect(r.json.notes).toBeInstanceOf(Array);
+});
+
 test('GET /api/budgets returns the three providers', async () => {
   const r = await api('GET', '/api/budgets');
   expect(r.status).toBe(200);

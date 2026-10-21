@@ -6,9 +6,11 @@ interface Props {
   tab: Tab;
   settings: Settings;
   onStart: (pick?: { provider: Provider; model: string | null }) => Promise<void>;
+  available?: Provider[];
 }
 
-export function VoteCard({ tab, settings, onStart }: Props) {
+export function VoteCard({ tab, settings, onStart, available }: Props) {
+  const providers = PROVIDERS.filter((p) => !available || available.includes(p));
   const vote = tab.vote;
   const [provider, setProvider] = useState<Provider>(tab.worker?.provider ?? 'gemini');
   const [model, setModel] = useState<string>(tab.worker?.model ?? '');
@@ -46,6 +48,11 @@ export function VoteCard({ tab, settings, onStart }: Props) {
           ))}
         </tbody>
       </table>
+      {tab.routing?.notes?.map((n) => (
+        <div key={n} className="muted small">
+          {n}
+        </div>
+      ))}
       {tab.routing?.reason && <div className="note">{tab.routing.reason}</div>}
       <div className="row wrap">
         <span>
@@ -55,7 +62,7 @@ export function VoteCard({ tab, settings, onStart }: Props) {
         {tab.status === 'awaiting-start' && (
           <>
             <select value={provider} onChange={(e) => setProvider(e.target.value as Provider)} aria-label="Worker provider">
-              {PROVIDERS.map((p) => (
+              {providers.map((p) => (
                 <option key={p} value={p}>
                   {PROVIDER_NAMES[p]}
                 </option>

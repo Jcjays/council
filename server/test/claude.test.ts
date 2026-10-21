@@ -108,7 +108,21 @@ test('structured_output is surfaced as result text when present', () => {
   expect(ev).toMatchObject({ type: 'result', text: '{"tier":"easy"}', usage: { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 } });
 });
 
-test('hook, thinking and rate-limit events produce nothing', () => {
+test('a rate_limit_event with plan windows becomes a quota event', () => {
+  const line = fixtureLines('claude-vote.jsonl').find((o) => o.type === 'rate_limit_event');
+  expect(line).toBeDefined();
+  expect(parseClaudeLine(line as Record<string, unknown>)).toEqual([
+    {
+      type: 'quota',
+      windows: [
+        { name: '5-hour', usedPct: 0.59, resetsAt: new Date(1792512600 * 1000).toISOString() },
+        { name: '7-day', usedPct: 0.51, resetsAt: new Date(1792767600 * 1000).toISOString() },
+      ],
+    },
+  ]);
+});
+
+test('hook, thinking and bare rate-limit events produce nothing', () => {
   expect(parseClaudeLine({ type: 'rate_limit_event' })).toEqual([]);
   expect(parseClaudeLine({ type: 'system', subtype: 'thinking_tokens' })).toEqual([]);
   expect(parseClaudeLine({ type: 'assistant', message: { content: [{ type: 'thinking', thinking: '' }] } })).toEqual([]);

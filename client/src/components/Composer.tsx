@@ -7,9 +7,11 @@ interface Props {
   settings: Settings;
   onSubmit: (text: string, mode: SubmitMode, fullAuto: boolean) => Promise<void>;
   onSend: (text: string) => Promise<void>;
+  available?: Provider[];
 }
 
-export function Composer({ tab, settings, onSubmit, onSend }: Props) {
+export function Composer({ tab, settings, onSubmit, onSend, available }: Props) {
+  const providers = PROVIDERS.filter((p) => !available || available.includes(p));
   const [text, setText] = useState('');
   const [mode, setMode] = useState<'auto' | Provider>('auto');
   const [model, setModel] = useState('');
@@ -62,8 +64,8 @@ export function Composer({ tab, settings, onSubmit, onSend }: Props) {
           <label>
             Route:
             <select value={mode} onChange={(e) => setMode(e.target.value as 'auto' | Provider)} aria-label="Routing mode">
-              <option value="auto">Auto (council votes)</option>
-              {PROVIDERS.map((p) => (
+              <option value="auto">{providers.length > 1 ? 'Auto (council votes)' : 'Auto (pick the model for me)'}</option>
+              {providers.map((p) => (
                 <option key={p} value={p}>
                   {PROVIDER_NAMES[p]}
                 </option>

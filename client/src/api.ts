@@ -1,4 +1,4 @@
-import type { BudgetState, CliHealth, PriceTable, ProjectInfo, Provider, Settings, SubmitMode, Tab } from './types';
+import type { BudgetState, CliHealth, EffectiveRouting, PriceTable, ProjectInfo, Provider, Settings, SubmitMode, Tab } from './types';
 
 async function call<T>(method: string, route: string, body?: unknown): Promise<T> {
   const res = await fetch(route, {
@@ -26,6 +26,7 @@ export const api = {
   pricing: () => call<PriceTable>('GET', '/api/pricing'),
   savePricing: (table: PriceTable) => call<PriceTable>('PUT', '/api/pricing', table),
   budgets: () => call<Record<Provider, BudgetState>>('GET', '/api/budgets'),
+  routing: (projectId?: string) => call<EffectiveRouting>('GET', projectId ? `/api/routing?projectId=${encodeURIComponent(projectId)}` : '/api/routing'),
   projects: () => call<ProjectInfo[]>('GET', '/api/projects'),
   openProject: (path: string) => call<ProjectInfo & { tabs: Tab[] }>('POST', '/api/projects', { path }),
   tabs: (projectId?: string) => call<Tab[]>('GET', projectId ? `/api/tabs?projectId=${encodeURIComponent(projectId)}` : '/api/tabs'),

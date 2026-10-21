@@ -1,7 +1,15 @@
-import type { Provider } from '../adapters/types.js';
+import type { Provider, QuotaWindow } from '../adapters/types.js';
 import type { ProviderSums } from './ledger.js';
 
+/** The latest usage windows a provider's CLI reported for this account. */
+export interface ProviderUsage {
+  windows: QuotaWindow[];
+  observedAt: string;
+}
+
 export interface BudgetState {
+  /** Present once a CLI run has reported its plan usage; absent for plain API keys. */
+  usage?: ProviderUsage;
   provider: Provider;
   spent: number;
   routingSpent: number;

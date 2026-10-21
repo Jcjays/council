@@ -1,5 +1,15 @@
 import { expect, test } from 'vitest';
-import { budgetTone, daysLeft, formatUsd, statusLabel, workerLabel } from './format';
+import { budgetTone, daysLeft, describeWindow, formatUsd, statusLabel, workerLabel } from './format';
+
+test('describeWindow reads as a sentence with the time to reset', () => {
+  expect(describeWindow({ name: '5-hour', usedPct: 0.59, resetsAt: '2026-10-21T04:30:00.000Z' }, new Date('2026-10-21T02:20:00.000Z'))).toBe(
+    '5-hour window: 59% used, resets in 2h 10m',
+  );
+  expect(describeWindow({ name: '7-day', usedPct: 1 }, new Date())).toBe('7-day window: 100% used');
+  expect(describeWindow({ name: '5-hour', usedPct: 0.5, resetsAt: '2026-10-21T02:00:00.000Z' }, new Date('2026-10-21T02:20:00.000Z'))).toBe(
+    '5-hour window: 50% used, resets now',
+  );
+});
 
 test('formatUsd shows four decimals under a cent and two otherwise', () => {
   expect(formatUsd(0.0012)).toBe('$0.0012');

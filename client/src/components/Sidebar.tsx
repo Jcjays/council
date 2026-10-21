@@ -13,6 +13,7 @@ interface Props {
   onNewTab: () => void;
   budgets: Record<Provider, BudgetState> | null;
   resetDay: number;
+  available?: Provider[] | null;
   view: 'tabs' | 'settings';
   onView: (v: 'tabs' | 'settings') => void;
   connected: boolean;
@@ -74,12 +75,12 @@ export function Sidebar(p: Props) {
         )}
       </section>
 
-      <BudgetBars budgets={p.budgets} resetDay={p.resetDay} />
+      <BudgetBars budgets={p.budgets} resetDay={p.resetDay} available={p.available} />
 
       <section className="tabs-list">
         <header className="section-title">
           <span>Tabs</span>
-          <button className="link" onClick={p.onNewTab} disabled={!p.project}>
+          <button className="link" onClick={p.onNewTab} disabled={!p.project || p.available?.length === 0}>
             + New tab
           </button>
         </header>
