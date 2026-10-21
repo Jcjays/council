@@ -30,7 +30,7 @@ export function autoLabel(available: Availability): string {
 }
 
 export function notSetUpTitle(p: Provider): string {
-  return `${PROVIDER_NAMES[p]} is not set up: install its CLI and sign in (Settings › Advanced › CLI health)`;
+  return `${PROVIDER_NAMES[p]} is not set up: install its CLI and sign in (Settings › CLI health)`;
 }
 
 /** `preferred` when it is set up, else the first provider that is, else `preferred`. */

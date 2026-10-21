@@ -15,9 +15,13 @@ Revised later the same day after two pieces of feedback from Chris:
   follow the project's CLAUDE.md / AGENTS.md / GEMINI.md; the developer reviews the changes in their editor or git.
   The branch chips, Merge and rebase buttons, the "remove the worktree" option and the details pane's Branch section
   are gone (the mockup still shows them; it predates this). The third step reads "Review".
-- **Settings is one simple page.** Monthly budgets, who does what, council seats and the two toggles; everything else
-  (warn %, reset day, seat timeout, cost ceiling, stall minutes, allowed commands, model lists, prices, CLI health)
-  sits behind a collapsed Advanced section. The save bar shows "Unsaved changes" and tints amber until Save.
+- **Settings is owned by another session** ("council-settings"), which is replacing the price table, model lists,
+  allowed commands and dollar budgets with automatic detection. This branch leaves `Settings.tsx` and `Health.tsx`
+  as they are on main and only styles them so they sit in the new shell. Chris asked for the page to be simple, with
+  the rarely-touched items behind an Advanced section; that is for the settings session to shape.
+- **Routing availability and plan usage** (`GET /api/routing`, `budgets[p].usage`): providers without a working CLI
+  are greyed "not set up" and cannot be chosen; with none set up, Home becomes a setup panel and the composer a
+  setup note. Usage windows a CLI reports are the primary meter for that provider, dollars beneath.
 
 ## What the two projects do, in one line each
 

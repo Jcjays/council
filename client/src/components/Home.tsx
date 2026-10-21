@@ -76,7 +76,7 @@ export function Home({ projects, project, openTabs, available, notes, health, on
           <p className="muted sm">
             Install one, sign in, and Council notices within a minute. The same table lives under{' '}
             <button className="link sm" onClick={onSettings}>
-              Settings › Advanced › CLI health
+              Settings › CLI health
             </button>
             .
           </p>

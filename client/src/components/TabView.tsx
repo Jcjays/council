@@ -204,7 +204,7 @@ export function TabView({ tab, settings, available, stallSeq, details, onToggleD
         {nothingSetUp && tab.status !== 'closed' ? (
           <div className="setup" role="status">
             <h3>No coding CLI is set up</h3>
-            <p className="sec sm">Council drives Claude Code, Codex CLI and Gemini CLI. Install one, sign in, and this tab can take a task. The details are under Settings › Advanced › CLI health.</p>
+            <p className="sec sm">Council drives Claude Code, Codex CLI and Gemini CLI. Install one, sign in, and this tab can take a task. The details are under Settings › CLI health.</p>
           </div>
         ) : (
           <Composer

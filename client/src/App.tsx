@@ -262,7 +262,7 @@ export function App() {
           </div>
         )}
         {view === 'settings' && settings ? (
-          <Settings settings={settings} onSaved={setSettings} health={health} available={available} onError={onError} />
+          <Settings settings={settings} onSaved={setSettings} health={health} onError={onError} />
         ) : selected && settings ? (
           <TabView key={selected.id} tab={selected} settings={settings} available={available} stallSeq={stallSeq[selected.id] ?? 0} details={details} onToggleDetails={toggleDetails} onError={onError} />
         ) : (
