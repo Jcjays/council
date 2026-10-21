@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { basename, budgetTone, costSource, daysLeft, elapsed, formatTokens, formatUsd, relativeTime, shortenPath, statusLabel, workerLabel } from './format';
+import { basename, budgetTone, costSource, daysLeft, elapsed, formatTokens, formatUsd, relativeTime, shortenPath, statusLabel, stripAnsi, workerLabel } from './format';
 
 test('formatUsd shows four decimals under a cent and two otherwise', () => {
   expect(formatUsd(0.0012)).toBe('$0.0012');
@@ -72,6 +72,12 @@ test('shortenPath strips the worktree prefix in either slash style', () => {
   expect(shortenPath('src/a.ts', 'C:/w')).toBe('src/a.ts');
   expect(shortenPath('C:/other/a.ts', 'C:/w')).toBe('C:/other/a.ts');
   expect(shortenPath('npm test', null)).toBe('npm test');
+});
+
+test('stripAnsi removes colour and cursor sequences', () => {
+  expect(stripAnsi('\u001b[33m5\u001b[39m')).toBe('5');
+  expect(stripAnsi('ok \u001b[1;32mpassed\u001b[0m\n\u001b[2K\u001b[1Gdone')).toBe('ok passed\ndone');
+  expect(stripAnsi('plain')).toBe('plain');
 });
 
 test('basename takes the last segment of either slash style', () => {

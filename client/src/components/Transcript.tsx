@@ -1,6 +1,6 @@
 import { useMemo, type ReactNode } from 'react';
 import { groupActivity } from '../lib/activity';
-import { costSource, formatTokens, formatUsd, shortTime } from '../lib/format';
+import { costSource, formatTokens, formatUsd, shortTime, stripAnsi } from '../lib/format';
 import type { Provider, TranscriptItem, Usage } from '../types';
 import { ActivityRun } from './ActivityRun';
 import { Markdown } from './Markdown';
@@ -27,7 +27,7 @@ function ResultLine({ item, provider }: { item: TranscriptItem; provider: Provid
           <span className="danger-text">exit {d.exitCode}</span>
         </>
       )}
-      {d.isError && item.text && <pre className="small">{item.text}</pre>}
+      {d.isError && item.text && <pre className="small">{stripAnsi(item.text)}</pre>}
     </div>
   );
 }

@@ -108,6 +108,14 @@ export function shortenPath(p: string, base: string | null | undefined): string 
   return same ? np.slice(nb.length + 1) : p;
 }
 
+// eslint-disable-next-line no-control-regex
+const ANSI = /\u001b\[[0-?]*[ -/]*[@-~]|\u001b\][^\u0007]*(?:\u0007|\u001b\\)/g;
+
+/** Tool output without terminal colour and cursor escape sequences. */
+export function stripAnsi(text: string): string {
+  return text.replace(ANSI, '');
+}
+
 /** The last path segment of a checkout, for the project picker. */
 export function basename(p: string): string {
   const parts = p.replace(/[\\/]+$/, '').split(/[\\/]/);

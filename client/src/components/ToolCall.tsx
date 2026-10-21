@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { lineDiff } from '../lib/diff';
-import { shortenPath } from '../lib/format';
+import { shortenPath, stripAnsi } from '../lib/format';
 import { classifyTool } from '../lib/tools';
 import type { TranscriptItem } from '../types';
 import { DiffView } from './DiffView';
@@ -75,11 +75,11 @@ export function ToolCall({ item, pathBase }: { item: TranscriptItem; pathBase?: 
               ))}
             </div>
           )}
-          {view.kind === 'command' && <pre className="out">{tool.output === undefined ? '…' : tool.output || '(no output)'}</pre>}
+          {view.kind === 'command' && <pre className="out">{tool.output === undefined ? '…' : stripAnsi(tool.output) || '(no output)'}</pre>}
           {view.kind !== 'edit' && view.kind !== 'write' && view.kind !== 'command' && view.kind !== 'file-change' && tool.input !== null && tool.input !== undefined && (
             <pre className="small">{pretty(tool.input)}</pre>
           )}
-          {view.kind !== 'command' && tool.output && <pre className="out">{tool.output}</pre>}
+          {view.kind !== 'command' && tool.output && <pre className="out">{stripAnsi(tool.output)}</pre>}
         </>
       )}
     </div>
