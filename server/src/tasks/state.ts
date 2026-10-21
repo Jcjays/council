@@ -1,6 +1,6 @@
 import type { Tier } from '../adapters/types.js';
 
-export const TAB_STATUSES = ['drafting', 'voting', 'awaiting-start', 'running', 'idle', 'handing-off', 'failed', 'merged', 'closed'] as const;
+export const TAB_STATUSES = ['drafting', 'voting', 'awaiting-start', 'running', 'idle', 'handing-off', 'failed', 'closed'] as const;
 export type TabStatus = (typeof TAB_STATUSES)[number];
 
 export type TabEvent =
@@ -15,7 +15,6 @@ export type TabEvent =
   | 'escalate'
   | 'switch'
   | 'handoff-ready'
-  | 'merge-done'
   | 'close';
 
 export class InvalidTransition extends Error {
@@ -33,10 +32,9 @@ const TABLE: Record<TabStatus, Partial<Record<TabEvent, TabStatus>>> = {
   voting: { 'vote-done': 'awaiting-start', 'vote-done-autostart': 'running' },
   'awaiting-start': { start: 'running' },
   running: { 'worker-done': 'idle', 'worker-failed': 'failed' },
-  idle: { message: 'running', escalate: 'handing-off', switch: 'handing-off', 'merge-done': 'merged' },
-  failed: { message: 'running', escalate: 'handing-off', switch: 'handing-off', 'merge-done': 'merged' },
+  idle: { message: 'running', escalate: 'handing-off', switch: 'handing-off' },
+  failed: { message: 'running', escalate: 'handing-off', switch: 'handing-off' },
   'handing-off': { 'handoff-ready': 'running' },
-  merged: {},
   closed: {},
 };
 

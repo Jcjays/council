@@ -125,11 +125,9 @@ test('tabs: create, list, get, submit; the websocket streams the tab updates', a
   for (let i = 0; i < 100 && fixture.engine.getTab(id)?.status !== 'idle'; i++) await new Promise((r) => setTimeout(r, 30));
   expect(fixture.engine.getTab(id)?.status).toBe('idle');
 
-  const merged = await api('POST', `/api/tabs/${id}/merge`);
-  expect(merged.json.result.kind).toBe('merged');
-  expect(merged.json.tab.status).toBe('merged');
+  expect((await api('POST', `/api/tabs/${id}/merge`)).status).toBe(404);
 
-  const closed = await api('POST', `/api/tabs/${id}/close`, { deleteWorktree: false });
+  const closed = await api('POST', `/api/tabs/${id}/close`);
   expect(closed.json.status).toBe('closed');
   ws.close();
 });

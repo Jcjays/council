@@ -6,7 +6,7 @@ export const PROVIDERS: Provider[] = ['gemini', 'codex', 'claude'];
 export type Tier = 'easy' | 'medium' | 'hard';
 export const TIERS: Tier[] = ['easy', 'medium', 'hard'];
 
-export type TabStatus = 'drafting' | 'voting' | 'awaiting-start' | 'running' | 'idle' | 'handing-off' | 'failed' | 'merged' | 'closed';
+export type TabStatus = 'drafting' | 'voting' | 'awaiting-start' | 'running' | 'idle' | 'handing-off' | 'failed' | 'closed';
 
 export interface Usage {
   inputTokens: number;
@@ -51,11 +51,6 @@ export interface CouncilResult {
   counts: Record<Tier, number>;
 }
 
-export type MergeResult =
-  | { kind: 'merged'; sha: string }
-  | { kind: 'blocked'; reason: string; files?: string[] }
-  | { kind: 'conflict'; files: string[] };
-
 export interface Tab {
   id: string;
   projectId: string;
@@ -65,7 +60,6 @@ export interface Tab {
   tier: Tier | null;
   worker: TabWorker | null;
   previousWorkers: TabWorker[];
-  worktree: { path: string; branch: string } | null;
   vote: CouncilResult | null;
   routing: { shiftedFrom?: Tier; reason?: string } | null;
   transcript: TranscriptItem[];
@@ -73,7 +67,6 @@ export interface Tab {
   fullAuto: boolean;
   escalations: number;
   stalled: boolean;
-  lastMerge: MergeResult | null;
   createdAt: string;
   updatedAt: string;
 }

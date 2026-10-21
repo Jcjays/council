@@ -115,11 +115,11 @@ export function App() {
         {view === 'settings' && settings ? (
           <Settings settings={settings} onSaved={setSettings} health={health} onError={onError} />
         ) : selected && settings ? (
-          <TabView tab={selected} settings={settings} project={project} onError={onError} />
+          <TabView tab={selected} settings={settings} onError={onError} />
         ) : (
           <main className="empty">
             <h2>Council</h2>
-            <p>Open a project on the left, create a tab, and describe a task. The council votes on how hard it is and hands it to the cheapest capable agent in its own git worktree.</p>
+            <p>Open a project on the left, create a tab, and describe a task. The council votes on how hard it is and hands it to the cheapest capable agent, which works directly in your checkout and follows the project's CLAUDE.md, AGENTS.md or GEMINI.md. Nothing is committed; review the changes in your editor or git.</p>
             {!project && projects.length === 0 && <p className="muted">Paste the path of a git checkout to begin.</p>}
           </main>
         )}

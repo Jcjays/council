@@ -42,7 +42,6 @@ const STATUS_LABELS: Record<TabStatus, string> = {
   idle: 'Idle',
   'handing-off': 'Handing off',
   failed: 'Failed',
-  merged: 'Merged',
   closed: 'Closed',
 };
 

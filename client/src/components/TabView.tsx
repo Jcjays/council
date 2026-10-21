@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { api } from '../api';
 import { formatUsd, PROVIDER_NAMES, statusLabel, workerLabel } from '../lib/format';
-import { PROVIDERS, type ProjectInfo, type Provider, type Settings, type SubmitMode, type Tab } from '../types';
+import { PROVIDERS, type Provider, type Settings, type SubmitMode, type Tab } from '../types';
 import { Composer } from './Composer';
 import { Transcript } from './Transcript';
 import { VoteCard } from './VoteCard';
@@ -9,16 +9,14 @@ import { VoteCard } from './VoteCard';
 interface Props {
   tab: Tab;
   settings: Settings;
-  project: ProjectInfo | null;
   onError: (message: string) => void;
 }
 
-export function TabView({ tab, settings, project, onError }: Props) {
+export function TabView({ tab, settings, onError }: Props) {
   const [switching, setSwitching] = useState(false);
   const [switchProvider, setSwitchProvider] = useState<Provider>('claude');
   const [switchModel, setSwitchModel] = useState('');
   const [closing, setClosing] = useState(false);
-  const [deleteWorktree, setDeleteWorktree] = useState(true);
   const [busy, setBusy] = useState(false);
 
   const act = async (fn: () => Promise<unknown>) => {
@@ -34,7 +32,6 @@ export function TabView({ tab, settings, project, onError }: Props) {
 
   const settled = tab.status === 'idle' || tab.status === 'failed';
   const canEscalate = settled && tab.tier !== null && tab.tier !== 'hard';
-  const conflict = tab.lastMerge?.kind === 'conflict';
 
   return (
     <main className="tabview">
@@ -45,11 +42,6 @@ export function TabView({ tab, settings, project, onError }: Props) {
             <span className={`status-pill status-${tab.status}`}>{statusLabel(tab.status)}</span>
             {tab.tier && <span className={`tier tier-${tab.tier}`}>{tab.tier}</span>}
             <span>{workerLabel(tab.worker)}</span>
-            {tab.worktree && (
-              <code title={tab.worktree.path} className="muted">
-                {tab.worktree.branch}
-              </code>
-            )}
             <span className="muted">{formatUsd(tab.costUsd)}</span>
             {tab.fullAuto && <span className="warn-text">full auto</span>}
             {tab.stalled && <span className="warn-text">no output for a while</span>}
@@ -64,16 +56,6 @@ export function TabView({ tab, settings, project, onError }: Props) {
           {settled && (
             <button disabled={busy} onClick={() => setSwitching((s) => !s)}>
               Switch worker
-            </button>
-          )}
-          {settled && tab.worktree && (
-            <button disabled={busy} className="primary" onClick={() => void act(() => api.merge(tab.id))} title={`Commit the worktree and merge into ${project?.defaultBranch ?? 'the default branch'}`}>
-              Merge
-            </button>
-          )}
-          {settled && conflict && (
-            <button disabled={busy} onClick={() => void act(() => api.rebase(tab.id))} title="Ask the worker to rebase onto the default branch and resolve conflicts">
-              Ask worker to rebase
             </button>
           )}
           {tab.status !== 'closed' && (
@@ -115,23 +97,20 @@ export function TabView({ tab, settings, project, onError }: Props) {
           <span className="muted small">
             {tab.worker?.provider === switchProvider
               ? 'Same provider: the session continues with the new model.'
-              : 'A summary of the work so far is handed to the new worker in the same worktree.'}
+              : 'A summary of the work so far is handed to the new worker in the same checkout.'}
           </span>
         </div>
       )}
 
       {closing && (
         <div className="card row wrap">
-          <span>Close this tab?</span>
-          <label>
-            <input type="checkbox" checked={deleteWorktree} onChange={(e) => setDeleteWorktree(e.target.checked)} /> remove the worktree (the branch is kept if it has unmerged commits)
-          </label>
+          <span>Close this tab? A running worker is stopped; whatever it changed stays in your checkout.</span>
           <button
             className="danger"
             disabled={busy}
             onClick={() =>
               void act(async () => {
-                await api.close(tab.id, deleteWorktree);
+                await api.close(tab.id);
                 setClosing(false);
               })
             }
@@ -139,14 +118,6 @@ export function TabView({ tab, settings, project, onError }: Props) {
             Close tab
           </button>
           <button onClick={() => setClosing(false)}>Cancel</button>
-        </div>
-      )}
-
-      {tab.lastMerge && tab.lastMerge.kind !== 'merged' && (
-        <div className="card warn">
-          {tab.lastMerge.kind === 'conflict'
-            ? `Merge conflict in ${tab.lastMerge.files.join(', ')}. Ask the worker to rebase, or resolve it yourself.`
-            : `Merge blocked: ${tab.lastMerge.reason}${tab.lastMerge.files ? ` (${tab.lastMerge.files.join(', ')})` : ''}`}
         </div>
       )}
 

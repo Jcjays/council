@@ -70,7 +70,8 @@ export function buildHandoffPrompt(a: HandoffArgs): string {
       : `You are taking over a task from ${a.fromWorker}; the developer asked to continue with you.`;
   return [
     intro,
-    'Continue the work in the same git worktree. Do not start over and do not revert the previous changes unless they are wrong.',
+    'Continue the work in the same project checkout. Do not start over and do not revert the previous changes unless they are wrong.',
+    "Do not commit; leave the changes in the working copy for the developer to review. Follow the project's CLAUDE.md, AGENTS.md or GEMINI.md if present.",
     '',
     'Original task:',
     '<task>',
@@ -80,18 +81,9 @@ export function buildHandoffPrompt(a: HandoffArgs): string {
     `What ${a.fromWorker} did so far:`,
     a.summary,
     '',
-    'Uncommitted changes in the worktree (git diff --stat):',
+    'Uncommitted changes in the checkout (git diff --stat):',
     a.diffStat.trim() === '' ? '(none)' : a.diffStat,
     '',
     'Pick up from here. When you are done, say what you changed and what, if anything, is still open.',
-  ].join('\n');
-}
-
-export function buildRebasePrompt(defaultBranch: string): string {
-  return [
-    `The developer tried to merge this worktree's branch into ${defaultBranch} and git reported conflicts.`,
-    `Run \`git rebase ${defaultBranch}\` in this worktree and resolve every conflict so the intent of both sides is kept.`,
-    'Run the project tests if there are any, then finish the rebase. Do not force-push and do not touch other branches.',
-    'When done, say which files conflicted and how you resolved each one.',
   ].join('\n');
 }

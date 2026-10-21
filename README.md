@@ -2,7 +2,7 @@
 
 Council is a small local app that puts **Claude Code**, **Codex CLI** and **Gemini CLI** to work on the same project at the same time, and spends the expensive one only when it has to.
 
-You open a project, create a tab and describe a task. A *council* of cheap models votes on how hard the task is. The task goes to the cheapest worker that can handle it: Gemini for easy, Codex for medium, Claude for hard (all configurable). Each tab works in its own git worktree, so several agents edit the same repository in parallel without stepping on each other. Spend per provider is tallied against your monthly credit and shown on screen.
+You open a project, create a tab and describe a task. A *council* of cheap models votes on how hard the task is. The task goes to the cheapest worker that can handle it: Gemini for easy, Codex for medium, Claude for hard (all configurable). The worker edits your checkout directly, follows the project's own `CLAUDE.md`, `AGENTS.md` or `GEMINI.md`, and commits nothing; you review the result in your editor or git. Spend per provider is tallied against your monthly credit and shown on screen.
 
 Everything runs on your machine and talks to the CLIs you already have installed and signed in. Nothing leaves your machine except what those CLIs send to their vendors.
 
@@ -11,10 +11,9 @@ Everything runs on your machine and talks to the CLIs you already have installed
 1. **Describe** the task in a new tab. Pick *Auto* to let the council route it, or pick a specific provider and model yourself.
 2. **Vote.** Each council seat (by default Gemini Flash, a small Codex model and Claude Haiku) is asked, without tools, to classify the task as easy, medium or hard. Majority wins; a three-way split lands on medium; a two-way tie goes to the higher tier. The vote card shows every seat's answer, confidence, reason and cost.
 3. **Start.** The task is routed to the worker for that tier. If that provider's budget is exhausted, or its CLI is missing or not signed in, routing shifts to the nearest tier and says so. You can override the pick before starting, or turn on *auto-start* in Settings.
-4. **Work.** The worker runs in a git worktree on a `council/<task>-<id>` branch under `<project>/.worktrees/`. Its output, tool calls and cost stream into the tab. Follow-up messages resume the same CLI session.
-5. **Escalate or switch.** If the worker fails, the task is handed one tier up with a short summary of what was tried and the diff so far (once, automatically; after that it is your call). *Switch worker* does the same to any provider you choose; switching back resumes the earlier session.
-6. **Merge.** The Merge button commits the worktree and merges the branch into your default branch, provided your main checkout is clean and on that branch. Conflicts abort the merge and list the files; *Ask worker to rebase* sends the worker off to resolve them.
-7. **Close.** Closing a tab removes the worktree. The branch is kept if it has commits that were never merged.
+4. **Work.** The worker runs in your project checkout. Its output, tool calls and cost stream into the tab. Follow-up messages resume the same CLI session. Nothing is committed; the changes sit in your working copy like edits you made yourself. Two tabs editing the same files at the same time can collide, so give parallel tabs separate areas of the code.
+5. **Escalate or switch.** If the worker fails, the task is handed one tier up with a short summary of what was tried and the uncommitted diff so far (once, automatically; after that it is your call). *Switch worker* does the same to any provider you choose; switching back resumes the earlier session.
+6. **Review and close.** Look at the changes in your editor or `git diff`, keep or discard them, and close the tab. Closing stops a running worker and leaves the checkout as it is.
 
 ## Requirements
 
@@ -56,7 +55,7 @@ Claude Code reports its own cost per run and that number is used as is. If you r
 
 - Council seats are tool-less only on Claude. Codex and Gemini seats are *asked* not to read files and are cut off after 60 seconds, but a chatty seat can still spend more than the per-vote ceiling; the vote card flags it.
 - Sign-in detection is a heuristic (API key in the environment, or a stored login file). A provider can look signed in and still fail; the failure shows in the transcript and escalation takes over.
-- Gemini CLI resumes sessions per directory. Each tab has its own worktree, so that works, but very old Gemini CLIs may not accept the prompt on stdin.
+- Gemini CLI resumes sessions per directory, so two Gemini tabs on the same project share a session list; very old Gemini CLIs may not accept the prompt on stdin.
 - The Codex and Gemini stream parsers were written from the documented event shapes; if a CLI release changes them, the transcript goes quiet while the cost is still recorded. Fixtures live in `server/test/fixtures`.
 - One developer, one machine. There is no team server.
 

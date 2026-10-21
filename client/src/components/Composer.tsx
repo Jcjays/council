@@ -27,11 +27,9 @@ export function Composer({ tab, settings, onSubmit, onSend }: Props) {
           ? 'Start the worker from the vote card above.'
           : tab.status === 'handing-off'
             ? 'Handing the task over…'
-            : tab.status === 'merged'
-              ? 'This tab is merged. Open a new tab for more work.'
-              : tab.status === 'closed'
-                ? 'This tab is closed.'
-                : '';
+            : tab.status === 'closed'
+              ? 'This tab is closed.'
+              : '';
 
   const go = async () => {
     const t = text.trim();

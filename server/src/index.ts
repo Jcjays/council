@@ -9,7 +9,6 @@ import { createServer } from './http.js';
 import { PricingStore } from './ledger/pricing.js';
 import { TaskEngine } from './tasks/engine.js';
 import { TabStore } from './tasks/store.js';
-import { WorktreeManager } from './worktrees/manager.js';
 
 const HEALTH_TTL_MS = 60_000;
 
@@ -47,7 +46,6 @@ async function main(): Promise<void> {
 
   const engine = new TaskEngine({
     adapters,
-    worktrees: (root) => new WorktreeManager(root),
     store,
     ledgerFile: p.ledger,
     settings: () => settings.get(),

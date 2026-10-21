@@ -7,16 +7,17 @@ import { repoSnapshot } from '../council/snapshot.js';
 import { budgetState, type BudgetState } from '../ledger/budget.js';
 import { appendEntry, currentPeriod, readEntries, sumPeriod } from '../ledger/ledger.js';
 import { costFor, lookupPrice, type PriceTable } from '../ledger/pricing.js';
-import type { MergeResult, WorktreeOps } from '../worktrees/manager.js';
+import { diffStat as gitDiffStat } from '../worktrees/git.js';
 import { clipText, clipValue } from './clip.js';
-import { buildHandoffPrompt, buildRebasePrompt, buildSummaryPrompt, mechanicalSummary } from './handoff.js';
+import { buildHandoffPrompt, buildSummaryPrompt, mechanicalSummary } from './handoff.js';
 import { canEscalate, transition, type TabStatus } from './state.js';
 import { newId, newTab, type TabStore } from './store.js';
 import type { Tab, TabWorker, TranscriptItem, TranscriptKind } from './types.js';
 
 export interface EngineDeps {
   adapters: Record<Provider, Adapter>;
-  worktrees: (projectRoot: string) => WorktreeOps;
+  /** Uncommitted-change summary of a checkout, for hand-off prompts. Defaults to git. */
+  diffStat?: (projectRoot: string) => Promise<string>;
   store: TabStore;
   ledgerFile: string;
   settings: () => Settings;
@@ -55,9 +56,11 @@ function isClosed(tab: Tab): boolean {
 }
 
 /**
- * Owns every tab: council votes, worker runs, escalation and switching, merge and
- * close. Emits `tab` (full tab after each change), `item` ({tabId, item}),
- * `stall` ({tabId}), `ledger` ({tabId, provider, costUsd}) and `engine-error`.
+ * Owns every tab: council votes, worker runs, escalation and switching, and
+ * close. Workers run directly in the project checkout and never commit; the
+ * developer reviews the result in their editor or git. Emits `tab` (full tab
+ * after each change), `item` ({tabId, item}), `stall` ({tabId}),
+ * `ledger` ({tabId, provider, costUsd}) and `engine-error`.
  */
 export class TaskEngine extends EventEmitter {
   private readonly tabs = new Map<string, Tab>();
@@ -128,14 +131,6 @@ export class TaskEngine extends EventEmitter {
     if (opts.fullAuto !== undefined) tab.fullAuto = opts.fullAuto;
     this.addItem(tab, 'user', text);
 
-    try {
-      tab.worktree = await this.deps.worktrees(tab.projectRoot).create(tab.id, tab.title);
-    } catch (err) {
-      this.addItem(tab, 'error', `Could not create a worktree: ${(err as Error).message}`);
-      await this.touch(tab);
-      throw err;
-    }
-
     if (mode.kind === 'manual') {
       tab.worker = { provider: mode.provider, model: mode.model, sessionId: null };
       tab.tier = this.tierFor(tab, mode.provider) ?? 'medium';
@@ -199,57 +194,14 @@ export class TaskEngine extends EventEmitter {
     return tab;
   }
 
-  async merge(tabId: string): Promise<{ tab: Tab; result: MergeResult }> {
-    const tab = this.must(tabId);
-    this.require(tab, ['idle', 'failed']);
-    if (!tab.worktree) throw new Error('this tab has no worktree yet');
-    const wt = this.deps.worktrees(tab.projectRoot);
-    const commit = await wt.commitAll(tab.worktree.path, `council(${tab.id}): ${tab.title}`);
-    const target = await wt.defaultBranch();
-    const result = await wt.mergeInto(tab.worktree.branch, target);
-    tab.lastMerge = result;
-    if (result.kind === 'merged') {
-      tab.status = transition(tab.status, 'merge-done');
-      this.addItem(tab, 'system', `Merged ${tab.worktree.branch} into ${target} (${result.sha})${commit.committed ? `, after committing ${commit.sha}` : ''}.`);
-    } else if (result.kind === 'conflict') {
-      this.addItem(tab, 'system', `Merge into ${target} hit conflicts in: ${result.files.join(', ')}. The merge was aborted.`);
-    } else {
-      this.addItem(tab, 'system', `Merge blocked: ${result.reason}${result.files ? ` (${result.files.join(', ')})` : ''}`);
-    }
-    await this.touch(tab);
-    return { tab, result };
-  }
-
-  async askRebase(tabId: string): Promise<Tab> {
-    const tab = this.must(tabId);
-    const target = await this.deps.worktrees(tab.projectRoot).defaultBranch();
-    return this.send(tabId, buildRebasePrompt(target));
-  }
-
-  async close(tabId: string, opts: { deleteWorktree: boolean }): Promise<Tab> {
+  /** Stops any running worker and closes the tab. Whatever the worker changed stays in the checkout. */
+  async close(tabId: string): Promise<Tab> {
     const tab = this.must(tabId);
     const run = this.runs.get(tab.id);
     run?.ac.abort();
     tab.status = transition(tab.status, 'close');
     await this.touch(tab);
     if (run) await Promise.race([run.done, new Promise<void>((r) => setTimeout(r, CLOSE_WAIT_MS))]);
-
-    if (opts.deleteWorktree && tab.worktree) {
-      const wt = this.deps.worktrees(tab.projectRoot);
-      try {
-        let keepBranch = true;
-        try {
-          keepBranch = await wt.hasUnmergedCommits(tab.worktree.branch, await wt.defaultBranch());
-        } catch {
-          /* keep the branch when unsure */
-        }
-        await wt.remove(tab.worktree.path, { keepBranch, branch: tab.worktree.branch });
-        this.addItem(tab, 'system', `Worktree removed; branch ${tab.worktree.branch} ${keepBranch ? 'kept (has unmerged commits)' : 'deleted'}.`);
-      } catch (err) {
-        this.addItem(tab, 'error', `Could not remove the worktree at ${tab.worktree.path}: ${(err as Error).message}`);
-      }
-      await this.touch(tab);
-    }
     return tab;
   }
 
@@ -353,7 +305,7 @@ export class TaskEngine extends EventEmitter {
 
   private async runVote(tab: Tab, task: string): Promise<void> {
     const s = this.settingsFor(tab);
-    const cwd = tab.worktree?.path ?? tab.projectRoot;
+    const cwd = tab.projectRoot;
     const snapshot = await (this.deps.snapshot ?? repoSnapshot)(cwd);
     const result = await runCouncil({
       seats: s.seats,
@@ -415,7 +367,7 @@ export class TaskEngine extends EventEmitter {
     armStall();
     try {
       const events = this.deps.adapters[worker.provider].run({
-        cwd: tab.worktree?.path ?? tab.projectRoot,
+        cwd: tab.projectRoot,
         prompt,
         model: worker.model,
         purpose: 'work',
@@ -536,12 +488,10 @@ export class TaskEngine extends EventEmitter {
   private async finishHandoff(tab: Tab, from: TabWorker, reason: 'escalate' | 'switch'): Promise<void> {
     const summary = await this.summarize(tab);
     let diffStat = '';
-    if (tab.worktree) {
-      try {
-        diffStat = await this.deps.worktrees(tab.projectRoot).diffStat(tab.worktree.path);
-      } catch {
-        /* no diff available */
-      }
+    try {
+      diffStat = await (this.deps.diffStat ?? gitDiffStat)(tab.projectRoot);
+    } catch {
+      /* no diff available */
     }
     if (isClosed(tab)) return;
     const prompt = buildHandoffPrompt({ task: this.taskText(tab), summary, diffStat, fromWorker: label(from), reason });
@@ -566,7 +516,7 @@ export class TaskEngine extends EventEmitter {
     try {
       let text = '';
       const events = this.deps.adapters[seat.provider].run({
-        cwd: tab.worktree?.path ?? tab.projectRoot,
+        cwd: tab.projectRoot,
         prompt: buildSummaryPrompt(tab.transcript),
         model: seat.model,
         purpose: 'summarize',

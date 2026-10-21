@@ -81,7 +81,6 @@ export function newTab(store: TabStore, projectRoot: string, title: string): Tab
     tier: null,
     worker: null,
     previousWorkers: [],
-    worktree: null,
     vote: null,
     routing: null,
     transcript: [],
@@ -89,7 +88,6 @@ export function newTab(store: TabStore, projectRoot: string, title: string): Tab
     fullAuto: false,
     escalations: 0,
     stalled: false,
-    lastMerge: null,
     createdAt: now,
     updatedAt: now,
   };
