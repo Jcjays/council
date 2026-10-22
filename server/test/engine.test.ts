@@ -423,7 +423,7 @@ test('Refresh usage runs the cheapest probe on each set-up CLI that reports usag
   const claude = new FakeAdapter('claude', () => ({ events: probeEvents }));
   const { engine, ledgerFile, adapters } = setup({ adapters: { claude }, health: { codex: false } });
   const r = await engine.refreshUsage();
-  expect(claude.calls).toEqual([expect.objectContaining({ purpose: 'probe', model: 'claude-haiku-5-5', fullAuto: false })]);
+  expect(claude.calls).toEqual([expect.objectContaining({ purpose: 'probe', model: 'claude-haiku-5-5', fullAuto: false, cwd: os.tmpdir() })]);
   expect(adapters.codex.calls).toEqual([]);
   expect(adapters.gemini.calls).toEqual([]);
   expect(r.probed).toEqual(['claude']);

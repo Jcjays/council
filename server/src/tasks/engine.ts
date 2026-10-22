@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { EventEmitter } from 'node:events';
+import os from 'node:os';
 import { PROVIDERS, TIER_ORDER, type Adapter, type CliHealth, type Provider, type ProviderPlan, type QuotaWindow, type ResultEvent, type Tier } from '../adapters/types.js';
 import { effectiveSettings, type PermissionMode, type Settings } from '../config/settings.js';
 import { runCouncil, type Seat } from '../council/council.js';
@@ -199,7 +200,7 @@ export class TaskEngine extends EventEmitter {
         const model = s.models[p]?.[0] ?? null;
         try {
           const events = this.deps.adapters[p].run({
-            cwd: process.cwd(),
+            cwd: os.tmpdir(),
             prompt: 'Reply with the single word ok.',
             model,
             purpose: 'probe',
