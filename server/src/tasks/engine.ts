@@ -1,6 +1,7 @@
+import { randomBytes } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { PROVIDERS, TIER_ORDER, type Adapter, type CliHealth, type Provider, type QuotaWindow, type ResultEvent, type Tier } from '../adapters/types.js';
-import { effectiveSettings, type Settings } from '../config/settings.js';
+import { effectiveSettings, type PermissionMode, type Settings } from '../config/settings.js';
 import { runCouncil, type Seat } from '../council/council.js';
 import { effectiveRouting, type EffectiveRouting } from '../council/effective.js';
 import { route } from '../council/routing.js';
@@ -8,12 +9,14 @@ import { repoSnapshot } from '../council/snapshot.js';
 import { budgetState, type BudgetState, type ProviderUsage } from '../ledger/budget.js';
 import { appendEntry, currentPeriod, readEntries, sumPeriod } from '../ledger/ledger.js';
 import { costFor, lookupPrice, type PriceTable } from '../ledger/pricing.js';
+import type { Decision } from '../mcp/permission-tool.js';
 import { diffStat as gitDiffStat } from '../worktrees/git.js';
 import { clipText, clipValue } from './clip.js';
 import { buildHandoffPrompt, buildSummaryPrompt, mechanicalSummary } from './handoff.js';
+import { describeRequest, permissionRule, ruleAllows } from './permissions.js';
 import { canEscalate, transition, type TabStatus } from './state.js';
 import { newId, newTab, type TabStore } from './store.js';
-import type { Tab, TabWorker, TranscriptItem, TranscriptKind } from './types.js';
+import type { PermissionItemData, PermissionStatus, Tab, TabWorker, TranscriptItem, TranscriptKind } from './types.js';
 
 export interface EngineDeps {
   adapters: Record<Provider, Adapter>;
@@ -26,6 +29,8 @@ export interface EngineDeps {
   /** Latest CLI health; providers reported as not installed are routed around. */
   health?: () => Partial<Record<Provider, CliHealth>>;
   snapshot?: (cwd: string) => Promise<string>;
+  /** Base URL of this Council server, for the permission tool a Claude worker runs. Unset: Claude cannot ask and is limited to edits. */
+  permissionUrl?: () => string | undefined;
   now?: () => Date;
 }
 
@@ -36,8 +41,41 @@ export interface WorkerPick {
   model: string | null;
 }
 
+/** Allow once, allow for the rest of this tab, or deny. */
+export type PermissionAnswer = 'allow-once' | 'allow-tab' | 'deny';
+
+export interface PermissionAsk {
+  tabId: string;
+  token: string;
+  toolName: string;
+  input: unknown;
+  toolUseId?: string;
+}
+
+export type PermissionReply = { id: string; status: 'pending' } | { id: string; status: 'answered'; decision: Decision };
+
+/** Thrown for a permission call that does not belong to a running worker. */
+export class PermissionRefused extends Error {}
+
+interface PendingPermission {
+  id: string;
+  tabId: string;
+  token: string;
+  item: TranscriptItem;
+  decision?: Decision;
+  settled: Promise<void>;
+  settle: () => void;
+}
+
+const DENIED_MESSAGE = 'The developer denied this in Council. Do not retry it; carry on without it, or say what you needed and why.';
+
 interface ActiveRun {
   ac: AbortController;
+  /** Proves a permission request comes from this run's tool. */
+  token: string;
+  /** Permission requests waiting for the developer; the stall timer is off while any are. */
+  waiting: number;
+  armStall: () => void;
   stallTimer?: NodeJS.Timeout;
   /** Resolves once the worker loop has fully unwound. */
   done: Promise<void>;
@@ -67,6 +105,7 @@ export class TaskEngine extends EventEmitter {
   private readonly tabs = new Map<string, Tab>();
   private readonly runs = new Map<string, ActiveRun>();
   private readonly saveTimers = new Map<string, NodeJS.Timeout>();
+  private readonly permissions = new Map<string, PendingPermission>();
   private readonly usageByProvider: Partial<Record<Provider, ProviderUsage>> = {};
   private readonly now: () => Date;
 
@@ -141,6 +180,7 @@ export class TaskEngine extends EventEmitter {
 
   async createTab(projectRoot: string, title: string): Promise<Tab> {
     const tab = newTab(this.deps.store, projectRoot, title);
+    tab.fullAuto = effectiveSettings(this.deps.settings(), tab.projectId).permissionMode === 'auto';
     this.tabs.set(tab.id, tab);
     await this.touch(tab);
     return tab;
@@ -216,10 +256,92 @@ export class TaskEngine extends EventEmitter {
     return tab;
   }
 
+  /** Ask mode or Auto for this tab. Auto also answers whatever is waiting; Ask takes effect from the next run. */
+  async setPermissionMode(tabId: string, mode: PermissionMode): Promise<Tab> {
+    const tab = this.must(tabId);
+    if (tab.status === 'closed') throw new Error('tab is closed');
+    const auto = mode === 'auto';
+    if (tab.fullAuto !== auto) {
+      tab.fullAuto = auto;
+      const running = this.runs.has(tab.id);
+      this.addItem(
+        tab,
+        'system',
+        auto
+          ? 'Permissions set to Auto: the worker no longer asks before running commands.'
+          : `Permissions set to Ask me${running ? '; the worker running now keeps Auto until it finishes' : ''}.`,
+      );
+      if (auto) this.settlePending(tab, { behavior: 'allow' }, 'allowed');
+    }
+    await this.touch(tab);
+    return tab;
+  }
+
+  /** A worker's permission tool asks whether a tool use may go ahead. Answered at once when Auto or a tab rule covers it. */
+  askPermission(ask: PermissionAsk): PermissionReply {
+    const tab = this.tabs.get(ask.tabId);
+    const run = tab ? this.runs.get(tab.id) : undefined;
+    if (!tab || !run) throw new PermissionRefused('no running worker for this tab');
+    if (run.token !== ask.token) throw new PermissionRefused('wrong permission token for this run');
+    const id = newId();
+    if (tab.fullAuto || (tab.allowedTools ?? []).some((rule) => ruleAllows(rule, ask.toolName, ask.input))) {
+      return { id, status: 'answered', decision: { behavior: 'allow' } };
+    }
+    const data: PermissionItemData = {
+      id,
+      toolName: ask.toolName,
+      input: clipValue(ask.input),
+      rule: permissionRule(ask.toolName, ask.input),
+      ...describeRequest(ask.toolName, ask.input),
+      status: 'pending',
+    };
+    const item = this.addItem(tab, 'permission', undefined, data);
+    let settle: () => void = () => {};
+    const settled = new Promise<void>((resolve) => {
+      settle = resolve;
+    });
+    this.permissions.set(id, { id, tabId: tab.id, token: ask.token, item, settled, settle });
+    run.waiting += 1;
+    if (run.stallTimer) clearTimeout(run.stallTimer);
+    this.emit('permission', { tabId: tab.id, item });
+    this.persistSoon(tab);
+    return { id, status: 'pending' };
+  }
+
+  /** Long-poll: the decision once the developer answers, or `pending` after `waitMs`. */
+  async waitForPermission(id: string, token: string, waitMs: number): Promise<PermissionReply> {
+    const p = this.permissions.get(id);
+    if (!p) throw new PermissionRefused('unknown permission request');
+    if (p.token !== token) throw new PermissionRefused('wrong permission token for this request');
+    if (!p.decision) {
+      let timer: NodeJS.Timeout | undefined;
+      await Promise.race([p.settled, new Promise<void>((r) => (timer = setTimeout(r, waitMs)))]);
+      clearTimeout(timer);
+    }
+    return p.decision ? { id, status: 'answered', decision: p.decision } : { id, status: 'pending' };
+  }
+
+  /** The developer's answer from the approval card. */
+  async answerPermission(id: string, answer: PermissionAnswer): Promise<Tab> {
+    const p = this.permissions.get(id);
+    if (!p) throw new Error('this request is no longer waiting; the worker has finished');
+    if (p.decision) throw new Error('this request was already answered');
+    const tab = this.must(p.tabId);
+    const data = p.item.data as PermissionItemData;
+    if (answer === 'allow-tab') {
+      tab.allowedTools = [...new Set([...(tab.allowedTools ?? []), data.rule])];
+    }
+    const decision: Decision = answer === 'deny' ? { behavior: 'deny', message: DENIED_MESSAGE } : { behavior: 'allow' };
+    this.resolvePermission(tab, p, decision, answer === 'deny' ? 'denied' : answer === 'allow-tab' ? 'allowed-tab' : 'allowed');
+    await this.touch(tab);
+    return tab;
+  }
+
   /** Stops any running worker and closes the tab. Whatever the worker changed stays in the checkout. */
   async close(tabId: string): Promise<Tab> {
     const tab = this.must(tabId);
     const run = this.runs.get(tab.id);
+    this.settlePending(tab, { behavior: 'deny', message: 'The tab was closed in Council.' }, 'denied');
     run?.ac.abort();
     tab.status = transition(tab.status, 'close');
     await this.touch(tab);
@@ -239,6 +361,30 @@ export class TaskEngine extends EventEmitter {
     if (!statuses.includes(tab.status)) {
       throw new Error(`tab is ${tab.status}; this action needs ${statuses.join(' or ')}`);
     }
+  }
+
+  private resolvePermission(tab: Tab, p: PendingPermission, decision: Decision, status: PermissionStatus): void {
+    if (p.decision) return;
+    p.decision = decision;
+    (p.item.data as PermissionItemData).status = status;
+    this.emit('item', { tabId: tab.id, item: p.item });
+    p.settle();
+    const run = this.runs.get(tab.id);
+    if (run && run.token === p.token) {
+      run.waiting = Math.max(0, run.waiting - 1);
+      if (run.waiting === 0) run.armStall();
+    }
+  }
+
+  /** Answers every request of this tab that is still waiting. */
+  private settlePending(tab: Tab, decision: Decision, status: PermissionStatus): void {
+    for (const p of this.permissions.values()) {
+      if (p.tabId === tab.id && !p.decision) this.resolvePermission(tab, p, decision, status);
+    }
+  }
+
+  private forgetPermissions(token: string): void {
+    for (const [id, p] of this.permissions) if (p.token === token) this.permissions.delete(id);
   }
 
   private settingsFor(tab: Tab): Settings {
@@ -377,19 +523,22 @@ export class TaskEngine extends EventEmitter {
     const done = new Promise<void>((resolve) => {
       finish = resolve;
     });
-    const run: ActiveRun = { ac: new AbortController(), done, finish };
-    this.runs.set(tab.id, run);
     const stallMs = Math.max(10, s.stallMinutes * 60_000);
+    const run: ActiveRun = { ac: new AbortController(), token: randomBytes(18).toString('base64url'), waiting: 0, armStall: () => {}, done, finish };
+    this.runs.set(tab.id, run);
     const armStall = () => {
       if (run.stallTimer) clearTimeout(run.stallTimer);
+      if (run.waiting > 0) return;
       run.stallTimer = setTimeout(() => {
-        if (tab.status === 'running' && !tab.stalled) {
+        if (tab.status === 'running' && !tab.stalled && run.waiting === 0) {
           tab.stalled = true;
           this.emit('stall', { tabId: tab.id });
           void this.touch(tab);
         }
       }, stallMs);
     };
+    run.armStall = armStall;
+    const url = tab.fullAuto ? undefined : this.deps.permissionUrl?.();
 
     let result: ResultEvent | undefined;
     let threw: string | undefined;
@@ -402,6 +551,7 @@ export class TaskEngine extends EventEmitter {
         purpose: 'work',
         resumeId: worker.sessionId ?? undefined,
         fullAuto: tab.fullAuto,
+        permissions: url ? { url, tabId: tab.id, token: run.token } : undefined,
         signal: run.ac.signal,
       });
       for await (const ev of events) {
@@ -454,7 +604,9 @@ export class TaskEngine extends EventEmitter {
       threw = err instanceof Error ? err.message : String(err);
     } finally {
       if (run.stallTimer) clearTimeout(run.stallTimer);
+      this.settlePending(tab, { behavior: 'deny', message: 'The worker run ended before the developer answered.' }, 'denied');
       this.runs.delete(tab.id);
+      this.forgetPermissions(run.token);
       run.finish();
     }
 

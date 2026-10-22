@@ -43,6 +43,7 @@ async function main(): Promise<void> {
   const pricing = await PricingStore.open(p.pricing);
   const store = new TabStore(p.projects);
   const health = healthCache();
+  let permissionUrl: string | undefined;
 
   const engine = new TaskEngine({
     adapters,
@@ -51,6 +52,7 @@ async function main(): Promise<void> {
     settings: () => settings.get(),
     pricing: () => pricing.get(),
     health: () => health.last() ?? {},
+    permissionUrl: () => permissionUrl,
   });
   engine.on('engine-error', ({ tabId, error }: { tabId: string; error: unknown }) => {
     console.error(`[council] tab ${tabId}:`, error instanceof Error ? error.message : error);
@@ -74,6 +76,7 @@ async function main(): Promise<void> {
   const port = Number(process.env.PORT ?? 4317);
   const host = process.env.HOST ?? '127.0.0.1';
   const bound = await server.listen(port, host);
+  permissionUrl = `http://127.0.0.1:${bound}`;
   console.log(`Council is running at http://localhost:${bound}  (data in ${p.home})`);
 }
 

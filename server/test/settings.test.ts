@@ -27,7 +27,7 @@ test('the defaults match the spec', () => {
   expect(DEFAULT_SETTINGS.stallMinutes).toBe(10);
   expect(DEFAULT_SETTINGS.seatTimeoutMs).toBe(60_000);
   expect(DEFAULT_SETTINGS.voteCostCeiling).toBe(0.05);
-  expect(DEFAULT_SETTINGS.allowedCommands.length).toBeGreaterThan(5);
+  expect(DEFAULT_SETTINGS.permissionMode).toBe('ask');
 });
 
 test('a partial file is merged over the defaults', async () => {
@@ -38,7 +38,7 @@ test('a partial file is merged over the defaults', async () => {
   expect(s.autoStart).toBe(true);
   expect(s.seats).toEqual([{ provider: 'gemini', model: 'flash' }]);
   expect(s.tierMap).toEqual(DEFAULT_SETTINGS.tierMap);
-  expect(s.allowedCommands).toEqual(DEFAULT_SETTINGS.allowedCommands);
+  expect(s.permissionMode).toBe('ask');
 });
 
 test('save then load round-trips', async () => {
@@ -65,10 +65,10 @@ test('a corrupt file falls back to the defaults instead of crashing', async () =
 });
 
 test('effectiveSettings applies a project override and leaves everything else', () => {
-  const s = { ...DEFAULT_SETTINGS, projectOverrides: { p1: { autoStart: true, allowedCommands: ['Bash(x)'] } } };
+  const s = { ...DEFAULT_SETTINGS, projectOverrides: { p1: { autoStart: true, permissionMode: 'auto' as const } } };
   const e = effectiveSettings(s, 'p1');
   expect(e.autoStart).toBe(true);
-  expect(e.allowedCommands).toEqual(['Bash(x)']);
+  expect(e.permissionMode).toBe('auto');
   expect(e.budgets).toEqual(s.budgets);
   expect(effectiveSettings(s, 'other')).toEqual(s);
 });

@@ -86,6 +86,7 @@ export function newTab(store: TabStore, projectRoot: string, title: string): Tab
     transcript: [],
     costUsd: 0,
     fullAuto: false,
+    allowedTools: [],
     escalations: 0,
     stalled: false,
     createdAt: now,

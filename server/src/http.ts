@@ -7,7 +7,7 @@ import { modelCatalog } from './config/models.js';
 import type { SettingsStore } from './config/settings.js';
 import type { PricingStore, PriceTable } from './ledger/pricing.js';
 import { isAllowedOrigin } from './origin.js';
-import type { SubmitMode, TaskEngine } from './tasks/engine.js';
+import { PermissionRefused, type PermissionAnswer, type SubmitMode, type TaskEngine } from './tasks/engine.js';
 import { defaultBranch, runGit } from './worktrees/git.js';
 import { attachWebSocket } from './ws.js';
 
@@ -74,6 +74,25 @@ function modelOf(v: unknown): string | null {
   return typeof v === 'string' && v.trim() !== '' ? v : null;
 }
 
+const ANSWERS: readonly PermissionAnswer[] = ['allow-once', 'allow-tab', 'deny'];
+
+function answer(v: unknown): PermissionAnswer {
+  if (typeof v !== 'string' || !(ANSWERS as readonly string[]).includes(v)) throw new HttpError(400, `answer must be one of ${ANSWERS.join(', ')}`);
+  return v as PermissionAnswer;
+}
+
+function permissionMode(v: unknown): 'ask' | 'auto' {
+  if (v !== 'ask' && v !== 'auto') throw new HttpError(400, 'mode must be ask or auto');
+  return v;
+}
+
+/** How long one long-poll from the permission tool may hold its request open. */
+const PERMISSION_WAIT_MS = 25_000;
+
+function waitMs(v: unknown): number {
+  return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.min(v, PERMISSION_WAIT_MS) : PERMISSION_WAIT_MS;
+}
+
 function submitMode(v: unknown): SubmitMode {
   if (!v || typeof v !== 'object') return { kind: 'auto' };
   const m = v as Json;
@@ -118,6 +137,27 @@ export function createServer(deps: ServerDeps): CouncilServer {
     }
 
     if (resource === 'models' && method === 'GET') return { status: 200, body: modelCatalog(deps.settings.get().models, deps.pricing.get()) };
+
+    if (resource === 'permissions' && method === 'POST') {
+      try {
+        if (id === 'ask') {
+          const reply = engine.askPermission({
+            tabId: str(body.tabId, 'tabId'),
+            token: str(body.token, 'token'),
+            toolName: str(body.toolName, 'toolName'),
+            input: body.input ?? {},
+            toolUseId: typeof body.toolUseId === 'string' ? body.toolUseId : undefined,
+          });
+          const reply2 = reply.status === 'pending' ? await engine.waitForPermission(reply.id, String(body.token), waitMs(body.waitMs)) : reply;
+          return { status: 200, body: reply2 };
+        }
+        if (id && action === 'wait') return { status: 200, body: await engine.waitForPermission(id, str(body.token, 'token'), waitMs(body.waitMs)) };
+        if (id && action === 'answer') return { status: 200, body: await engine.answerPermission(id, answer(body.answer)) };
+      } catch (err) {
+        if (err instanceof PermissionRefused) throw new HttpError(403, err.message);
+        throw err;
+      }
+    }
 
     if (resource === 'budgets' && method === 'GET') return { status: 200, body: await engine.budgets() };
 
@@ -187,6 +227,8 @@ export function createServer(deps: ServerDeps): CouncilServer {
               return { status: 200, body: await engine.switchWorker(id, provider(body.provider), modelOf(body.model)) };
             case 'close':
               return { status: 200, body: await engine.close(id) };
+            case 'permissions':
+              return { status: 200, body: await engine.setPermissionMode(id, permissionMode(body.mode)) };
             default:
               break;
           }

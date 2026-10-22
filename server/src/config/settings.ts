@@ -5,7 +5,9 @@ import type { Seat } from '../council/council.js';
 import type { TierMap } from '../council/routing.js';
 import { ladderIds } from './models.js';
 
-export type ProjectOverride = Partial<Pick<Settings, 'allowedCommands' | 'autoStart' | 'autoEscalate'>>;
+export type PermissionMode = 'ask' | 'auto';
+
+export type ProjectOverride = Partial<Pick<Settings, 'permissionMode' | 'autoStart' | 'autoEscalate'>>;
 
 export interface Settings {
   /** Monthly USD credit per provider; 0 disables tracking for that provider. */
@@ -19,8 +21,8 @@ export interface Settings {
   stallMinutes: number;
   seatTimeoutMs: number;
   voteCostCeiling: number;
-  /** Claude `--allowedTools` entries for workers that are not in Full auto. */
-  allowedCommands: string[];
+  /** New tabs start in this mode: `ask` prompts the developer (Claude) or keeps the CLI sandbox (Codex, Gemini); `auto` runs without either. */
+  permissionMode: PermissionMode;
   /** Model choices offered in the UI per provider. */
   models: Record<Provider, string[]>;
   recentProjects: string[];
@@ -46,29 +48,7 @@ export const DEFAULT_SETTINGS: Settings = {
   stallMinutes: 10,
   seatTimeoutMs: 60_000,
   voteCostCeiling: 0.05,
-  allowedCommands: [
-    'Bash(npm test*)',
-    'Bash(npm run *)',
-    'Bash(npx *)',
-    'Bash(pnpm *)',
-    'Bash(yarn *)',
-    'Bash(node *)',
-    'Bash(git status*)',
-    'Bash(git diff*)',
-    'Bash(git log*)',
-    'Bash(git add*)',
-    'Bash(git commit*)',
-    'Bash(ls*)',
-    'Bash(cat *)',
-    'Bash(./gradlew *)',
-    'Bash(gradle *)',
-    'Bash(mvn *)',
-    'Bash(cargo *)',
-    'Bash(go *)',
-    'Bash(python *)',
-    'Bash(pytest*)',
-    'Bash(dotnet *)',
-  ],
+  permissionMode: 'ask',
   models: ladderIds(),
   recentProjects: [],
   projectOverrides: {},

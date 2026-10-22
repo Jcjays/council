@@ -1,9 +1,15 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
-import { afterAll, beforeAll, expect, test } from 'vitest';
+import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import WebSocket from 'ws';
+import type { Adapter, AdapterEvent, Provider, RunOptions } from '../src/adapters/types.js';
 import { SettingsStore } from '../src/config/settings.js';
-import { PricingStore } from '../src/ledger/pricing.js';
+import { DEFAULT_PRICING, PricingStore } from '../src/ledger/pricing.js';
+import { askCouncil, toAskBody, type Decision } from '../src/mcp/permission-tool.js';
+import { TaskEngine } from '../src/tasks/engine.js';
+import { TabStore } from '../src/tasks/store.js';
+import { FakeAdapter, registry } from './helpers/fakeAdapter.js';
 import { createServer, type CouncilServer } from '../src/http.js';
 import { makeEngine, type EngineFixture } from './helpers/engineSetup.js';
 
@@ -215,4 +221,86 @@ test('serves the built client with an SPA fallback', async () => {
   const asset = await fetch(`${base}/assets/app.js`);
   expect(asset.headers.get('content-type')).toMatch(/javascript/);
   expect(await asset.text()).toBe('console.log(1)');
+});
+
+describe('permission prompts over HTTP', () => {
+  let permServer: CouncilServer;
+  let permBase = '';
+  let engine: TaskEngine;
+  const decisions: Decision[] = [];
+
+  /** Asks exactly as the MCP permission tool does, over the real HTTP API. */
+  class AskingClaude extends FakeAdapter {
+    constructor() {
+      super('claude', { events: [] });
+    }
+    override async *run(opts: RunOptions): AsyncGenerator<AdapterEvent> {
+      this.calls.push(opts);
+      yield { type: 'session', id: 's' };
+      const bridge = opts.permissions!;
+      const env = { url: bridge.url, tabId: bridge.tabId, token: bridge.token };
+      decisions.push(await askCouncil(env, toAskBody({ tool_name: 'Bash', input: { command: 'npm test' }, tool_use_id: 'tu1' }, env)));
+      yield { type: 'result', usage: { inputTokens: 1, cachedInputTokens: 0, outputTokens: 1 }, costUsd: 0, exitCode: 0, isError: false, text: 'ok' };
+    }
+  }
+
+  beforeAll(async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'council-http-perm-'));
+    const settings = new SettingsStore(path.join(home, 'settings.json'));
+    const claude = new AskingClaude();
+    engine = new TaskEngine({
+      adapters: registry(claude, new FakeAdapter('codex', { events: [] }), new FakeAdapter('gemini', { events: [] })) as Record<Provider, Adapter>,
+      store: new TabStore(path.join(home, 'projects')),
+      ledgerFile: path.join(home, 'ledger.jsonl'),
+      settings: () => settings.get(),
+      pricing: () => DEFAULT_PRICING,
+      snapshot: async () => '',
+      diffStat: async () => '',
+      permissionUrl: () => permBase,
+    });
+    engine.on('engine-error', () => {});
+    permServer = createServer({ engine, settings, pricing: new PricingStore(path.join(home, 'pricing.json')), health: async () => ({}) as never });
+    permBase = `http://127.0.0.1:${await permServer.listen(0, '127.0.0.1')}`;
+  });
+
+  afterAll(async () => {
+    await permServer.close();
+  });
+
+  const call = async (route: string, body: unknown) => {
+    const res = await fetch(`${permBase}${route}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    return { status: res.status, json: (await res.json()) as any };
+  };
+
+  test('the tool asks, the developer answers from the page, and the worker gets the answer', async () => {
+    const tab = engine.createTab('C:/proj', 't');
+    const id = (await tab).id;
+    await call(`/api/tabs/${id}/submit`, { text: 'go', mode: { kind: 'manual', provider: 'claude', model: null } });
+    let item: any;
+    for (let i = 0; i < 200 && !item; i++) {
+      item = engine.getTab(id)?.transcript.find((t) => t.kind === 'permission');
+      if (!item) await new Promise((r) => setTimeout(r, 10));
+    }
+    expect(item.data).toMatchObject({ toolName: 'Bash', detail: 'npm test', status: 'pending' });
+    const answered = await call(`/api/permissions/${item.data.id}/answer`, { answer: 'allow-tab' });
+    expect(answered.status).toBe(200);
+    expect(answered.json.allowedTools).toEqual(['Bash(npm test:*)']);
+    for (let i = 0; i < 200 && engine.getTab(id)?.status !== 'idle'; i++) await new Promise((r) => setTimeout(r, 10));
+    expect(decisions).toEqual([{ behavior: 'allow' }]);
+  });
+
+  test('a call with a bad token or for an unknown request is refused, and a bad answer is a 400', async () => {
+    const id = (await engine.createTab('C:/proj', 't2')).id;
+    expect((await call('/api/permissions/ask', { tabId: id, token: 'nope', toolName: 'Bash', input: {} })).status).toBe(403);
+    expect((await call('/api/permissions/unknown/wait', { token: 'nope' })).status).toBe(403);
+    expect((await call('/api/permissions/unknown/answer', { answer: 'maybe' })).status).toBe(400);
+  });
+
+  test('POST /api/tabs/:id/permissions switches the tab between Ask me and Auto', async () => {
+    const id = (await engine.createTab('C:/proj', 't3')).id;
+    const r = await call(`/api/tabs/${id}/permissions`, { mode: 'auto' });
+    expect(r.status).toBe(200);
+    expect(r.json.fullAuto).toBe(true);
+    expect((await call(`/api/tabs/${id}/permissions`, { mode: 'sometimes' })).status).toBe(400);
+  });
 });

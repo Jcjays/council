@@ -8,6 +8,7 @@ export type WsMessage =
   | { type: 'tab'; tab: unknown }
   | { type: 'item'; tabId: string; item: unknown }
   | { type: 'stall'; tabId: string }
+  | { type: 'permission'; tabId: string; item: unknown }
   | { type: 'budgets'; budgets: unknown };
 
 /**
@@ -54,6 +55,7 @@ export function attachWebSocket(server: http.Server, engine: TaskEngine): WebSoc
   engine.on('tab', (tab) => broadcast({ type: 'tab', tab }));
   engine.on('item', ({ tabId, item }: { tabId: string; item: unknown }) => broadcast({ type: 'item', tabId, item }));
   engine.on('stall', ({ tabId }: { tabId: string }) => broadcast({ type: 'stall', tabId }));
+  engine.on('permission', ({ tabId, item }: { tabId: string; item: unknown }) => broadcast({ type: 'permission', tabId, item }));
 
   let budgetTimer: NodeJS.Timeout | undefined;
   const budgetsSoon = () => {
