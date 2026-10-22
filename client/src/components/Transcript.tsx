@@ -1,7 +1,8 @@
-import { useMemo, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { groupActivity } from '../lib/activity';
 import { costSource, formatTokens, formatUsd, shortTime, stripAnsi } from '../lib/format';
-import type { Provider, TranscriptItem, Usage } from '../types';
+import { permissionVerb, ruleLabel } from '../lib/permissions';
+import type { PermissionAnswer, PermissionItemData, Provider, TranscriptItem, Usage } from '../types';
 import { ActivityRun } from './ActivityRun';
 import { Markdown } from './Markdown';
 
@@ -32,6 +33,48 @@ function ResultLine({ item, provider }: { item: TranscriptItem; provider: Provid
   );
 }
 
+/** A worker asking to do something: Allow once, Allow for this tab, or Deny; one line once answered. */
+function PermissionCard({ item, onAnswer }: { item: TranscriptItem; onAnswer?: (requestId: string, answer: PermissionAnswer) => Promise<void> }) {
+  const d = item.data as PermissionItemData;
+  const [busy, setBusy] = useState(false);
+  const answer = async (a: PermissionAnswer) => {
+    if (!onAnswer) return;
+    setBusy(true);
+    try {
+      await onAnswer(d.id, a);
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (d.status !== 'pending') {
+    return (
+      <div className={`item-permission done ${d.status === 'denied' ? 'denied' : 'allowed'}`}>
+        <b>{permissionVerb(d.status)}</b>
+        <span>{d.action}</span>
+        <code title={d.detail}>{d.detail}</code>
+        {d.status === 'allowed-tab' && <span className="muted xs">(and {ruleLabel(d.rule)} from now on)</span>}
+      </div>
+    );
+  }
+  return (
+    <section className="card warn item-permission" role="alert" aria-label="Permission request">
+      <div className="card-title">The worker wants to {d.action}</div>
+      <pre className="perm-detail">{d.detail}</pre>
+      <div className="row">
+        <button className="primary" disabled={busy || !onAnswer} onClick={() => void answer('allow-once')}>
+          Allow once
+        </button>
+        <button disabled={busy || !onAnswer} onClick={() => void answer('allow-tab')} title={`Allow ${ruleLabel(d.rule)} for the rest of this tab without asking`}>
+          Allow {d.rule.includes('(') ? <code>{ruleLabel(d.rule)}</code> : d.toolName} for this tab
+        </button>
+        <button className="danger" disabled={busy || !onAnswer} onClick={() => void answer('deny')}>
+          Deny
+        </button>
+      </div>
+    </section>
+  );
+}
+
 interface Props {
   items: TranscriptItem[];
   /** The tab's worker provider, for cost tooltips. */
@@ -40,10 +83,12 @@ interface Props {
   voteCard?: ReactNode;
   /** The project checkout; tool paths inside it are shown relative to it. */
   pathBase?: string | null;
+  /** Answers a worker's permission request. */
+  onPermission?: (requestId: string, answer: PermissionAnswer) => Promise<void>;
 }
 
 /** The tab's transcript: user bubbles, assistant markdown, folded tool-call runs, system lines, results and errors. */
-export function Transcript({ items, provider, voteCard, pathBase }: Props) {
+export function Transcript({ items, provider, voteCard, pathBase, onPermission }: Props) {
   const blocks = useMemo(() => groupActivity(items), [items]);
   const hasVoteItem = items.some((i) => i.kind === 'vote');
   return (
@@ -88,6 +133,8 @@ export function Transcript({ items, provider, voteCard, pathBase }: Props) {
             );
           case 'result':
             return <ResultLine key={item.id} item={item} provider={provider} />;
+          case 'permission':
+            return <PermissionCard key={item.id} item={item} onAnswer={onPermission} />;
           default:
             return null;
         }

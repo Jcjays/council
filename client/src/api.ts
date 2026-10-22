@@ -1,4 +1,4 @@
-import type { BudgetState, CliHealth, EffectiveRouting, PriceTable, ProjectInfo, Provider, Settings, SubmitMode, Tab } from './types';
+import type { BudgetState, CliHealth, EffectiveRouting, ModelCatalog, PermissionAnswer, PermissionMode, PriceTable, PricingStatus, ProjectInfo, Provider, Settings, SubmitMode, Tab, UsageRefresh } from './types';
 
 async function call<T>(method: string, route: string, body?: unknown): Promise<T> {
   const res = await fetch(route, {
@@ -23,8 +23,14 @@ export const api = {
   health: () => call<Record<Provider, CliHealth>>('GET', '/api/health'),
   settings: () => call<Settings>('GET', '/api/settings'),
   saveSettings: (partial: Partial<Settings>) => call<Settings>('PUT', '/api/settings', partial),
-  pricing: () => call<PriceTable>('GET', '/api/pricing'),
-  savePricing: (table: PriceTable) => call<PriceTable>('PUT', '/api/pricing', table),
+  pricing: () => call<PricingStatus>('GET', '/api/pricing'),
+  /** Replaces the hand-set price rows. */
+  savePriceOverrides: (overrides: PriceTable) => call<PricingStatus>('PUT', '/api/pricing', overrides),
+  refreshPrices: () => call<PricingStatus>('POST', '/api/pricing/refresh'),
+  models: () => call<ModelCatalog>('GET', '/api/models'),
+  refreshUsage: () => call<UsageRefresh>('POST', '/api/usage/refresh'),
+  answerPermission: (requestId: string, answer: PermissionAnswer) => call<Tab>('POST', `/api/permissions/${encodeURIComponent(requestId)}/answer`, { answer }),
+  setPermissionMode: (id: string, mode: PermissionMode) => call<Tab>('POST', `/api/tabs/${id}/permissions`, { mode }),
   budgets: () => call<Record<Provider, BudgetState>>('GET', '/api/budgets'),
   routing: (projectId?: string) => call<EffectiveRouting>('GET', projectId ? `/api/routing?projectId=${encodeURIComponent(projectId)}` : '/api/routing'),
   projects: () => call<ProjectInfo[]>('GET', '/api/projects'),

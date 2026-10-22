@@ -12,9 +12,9 @@ interface Props {
 }
 
 /**
- * One meter per provider. When the CLI reports its plan usage (Claude always,
- * Codex when it attaches rate limits) those windows are the primary meter and
- * the dollar ledger sits beneath; otherwise the dollar bar is the meter.
+ * One meter per provider. A subscription's usage windows (Claude always, Codex
+ * when it attaches rate limits) are the primary meter, with the month's spend
+ * beneath; an API key shows its spend, against the optional monthly cap.
  * The lighter segment of the dollar bar is what council votes and hand-off summaries cost.
  */
 export function BudgetBars({ budgets, resetDay, available, now = new Date() }: Props) {
@@ -26,16 +26,17 @@ export function BudgetBars({ budgets, resetDay, available, now = new Date() }: P
         const b = budgets?.[p];
         const setUp = isSetUp(available, p);
         const tone = b ? budgetTone(b.pct) : 'ok';
-        const total = b ? Math.min(1, b.pct) : 0;
+        const total = b && b.limit > 0 ? Math.min(1, b.spent / b.limit) : 0;
         const voteShare = b && b.limit > 0 ? Math.min(total, b.routingSpent / b.limit) : 0;
         const workShare = Math.max(0, total - voteShare);
         const windows = setUp ? (b?.usage?.windows ?? []) : [];
         if (windows.length > 0) anyUsage = true;
-        const dollars = !b ? '…' : b.limit > 0 ? `${formatUsd(b.spent)} / ${formatUsd(b.limit)}` : `${formatUsd(b.spent)} · untracked`;
+        const subscription = b?.plan?.kind === 'subscription';
+        const dollars = !b ? '…' : b.limit > 0 ? `${formatUsd(b.spent)} / ${formatUsd(b.limit)}` : `${formatUsd(b.spent)}${subscription ? ' API-equiv.' : ''}`;
         const title = !setUp
           ? `${PROVIDER_NAMES[p]} is not set up: install its CLI and sign in`
           : b
-            ? `${formatUsd(b.spent)} spent this period, of which ${formatUsd(b.routingSpent)} on council votes and hand-off summaries${b.limit > 0 ? `; limit ${formatUsd(b.limit)}` : '; not tracked'}${
+            ? `${b.plan ? `${b.plan.label}. ` : ''}${formatUsd(b.spent)} ${subscription ? 'API-equivalent ' : ''}this month, of which ${formatUsd(b.routingSpent)} on council votes and hand-off summaries${b.limit > 0 ? `; monthly cap ${formatUsd(b.limit)}` : ''}${
                 b.usage ? `. Plan usage reported by the ${PROVIDER_NAMES[p]} CLI at ${new Date(b.usage.observedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''
               }`
             : 'loading';
@@ -69,12 +70,16 @@ export function BudgetBars({ budgets, resetDay, available, now = new Date() }: P
                 <span className="amount">{dollars}</span>
               </div>
             )}
-            {b?.exhausted && setUp && <div className="budget-note">Budget spent: auto routing avoids {PROVIDER_NAMES[p]}</div>}
+            {b?.exhausted && setUp && (
+              <div className="budget-note">
+                {PROVIDER_NAMES[p]} {b.reason ?? 'is out'}: auto routing goes around it
+              </div>
+            )}
           </div>
         );
       })}
       <div className="legend" title={`The lighter end of a dollar bar is what council votes and hand-off summaries cost.${anyUsage ? '' : ' Plan usage windows appear by themselves once a CLI reports them during a run.'}`}>
-        {left} day{left === 1 ? '' : 's'} to reset · lighter = council votes
+        month resets in {left} day{left === 1 ? '' : 's'} · lighter = council votes
       </div>
     </section>
   );

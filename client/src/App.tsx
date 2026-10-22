@@ -9,7 +9,7 @@ import { useNow } from './hooks/useNow';
 import { laneOf, stepThrough, visibleOrder } from './lib/lanes';
 import { noneSetUp } from './lib/routing';
 import { shortcutAction } from './lib/shortcuts';
-import type { BudgetState, CliHealth, EffectiveRouting, ProjectInfo, Provider, Settings as SettingsT, Tab, TranscriptItem } from './types';
+import type { BudgetState, CliHealth, EffectiveRouting, ModelCatalog, ProjectInfo, Provider, Settings as SettingsT, Tab, TranscriptItem } from './types';
 import { useSocket } from './useSocket';
 
 const DETAILS_KEY = 'council.details';
@@ -44,6 +44,7 @@ export function App() {
   const [settings, setSettings] = useState<SettingsT | null>(null);
   const [health, setHealth] = useState<Record<Provider, CliHealth> | null>(null);
   const [routing, setRouting] = useState<EffectiveRouting | null>(null);
+  const [catalog, setCatalog] = useState<ModelCatalog | null>(null);
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
   const [project, setProject] = useState<ProjectInfo | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -58,6 +59,9 @@ export function App() {
   const now = useNow(10_000);
 
   const onError = useCallback((message: string) => setError(message), []);
+  const loadCatalog = useCallback(() => {
+    api.models().then(setCatalog).catch(() => {});
+  }, []);
 
   const connected = useSocket({
     onHello: (all, b) => {
@@ -88,6 +92,7 @@ export function App() {
 
   useEffect(() => {
     api.settings().then(setSettings).catch((e: Error) => onError(e.message));
+    loadCatalog();
     api.budgets().then(setBudgets).catch(() => {});
     api
       .projects()
@@ -96,7 +101,7 @@ export function App() {
         if (list[0]) await openProject(list[0].root);
       })
       .catch((e: Error) => onError(e.message));
-  }, [onError, openProject]);
+  }, [onError, openProject, loadCatalog]);
 
   // Health and the routing in force (which CLIs are set up) for the open project; re-read now and then.
   useEffect(() => {
@@ -262,9 +267,24 @@ export function App() {
           </div>
         )}
         {view === 'settings' && settings ? (
-          <Settings settings={settings} onSaved={setSettings} health={health} onError={onError} />
+          <Settings
+            settings={settings}
+            onSaved={(next) => {
+              setSettings(next);
+              loadCatalog();
+              api.routing(project?.projectId).then(setRouting).catch(() => {});
+            }}
+            health={health}
+            available={available}
+            routing={routing}
+            budgets={budgets}
+            onBudgets={setBudgets}
+            catalog={catalog}
+            onPricesChanged={loadCatalog}
+            onError={onError}
+          />
         ) : selected && settings ? (
-          <TabView key={selected.id} tab={selected} settings={settings} available={available} stallSeq={stallSeq[selected.id] ?? 0} details={details} onToggleDetails={toggleDetails} onError={onError} />
+          <TabView key={selected.id} tab={selected} settings={settings} catalog={catalog} available={available} stallSeq={stallSeq[selected.id] ?? 0} details={details} onToggleDetails={toggleDetails} onError={onError} />
         ) : (
           <Home projects={projects} project={project} openTabs={openTabs.length} available={available} notes={routing?.notes ?? []} health={health} onOpenProject={openFromUi} onNewTab={() => void newTab()} onSettings={() => setView('settings')} />
         )}

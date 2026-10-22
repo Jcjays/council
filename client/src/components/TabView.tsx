@@ -6,18 +6,20 @@ import { costSource, formatUsd, PROVIDER_NAMES } from '../lib/format';
 import { isStreaming, statusPhrase, tabChips, toneOf } from '../lib/lanes';
 import { firstSetUp, noneSetUp, type Availability } from '../lib/routing';
 import { shouldAskAboutStall, stallMessage } from '../lib/stall';
-import type { Provider, Settings, SubmitMode, Tab } from '../types';
+import { modelLabel, type Pick } from '../lib/models';
+import type { ModelCatalog, PermissionAnswer, PermissionMode, Provider, Settings, SubmitMode, Tab } from '../types';
 import { Composer } from './Composer';
 import { Details } from './Details';
 import { Glyph } from './Glyph';
 import { Steps } from './Home';
-import { ProviderSelect } from './ProviderSelect';
+import { ModelPicker } from './ModelPicker';
 import { Transcript } from './Transcript';
 import { VoteCard } from './VoteCard';
 
 interface Props {
   tab: Tab;
   settings: Settings;
+  catalog: ModelCatalog | null;
   available: Availability;
   /** Number of stall notices received for this tab. */
   stallSeq: number;
@@ -26,10 +28,9 @@ interface Props {
   onError: (message: string) => void;
 }
 
-export function TabView({ tab, settings, available, stallSeq, details, onToggleDetails, onError }: Props) {
+export function TabView({ tab, settings, catalog, available, stallSeq, details, onToggleDetails, onError }: Props) {
   const [switching, setSwitching] = useState(false);
-  const [switchProvider, setSwitchProvider] = useState<Provider>(() => firstSetUp(available, 'claude'));
-  const [switchModel, setSwitchModel] = useState('');
+  const [switchTo, setSwitchTo] = useState<Pick>(() => ({ provider: firstSetUp(available, 'claude'), model: null }));
   const [closing, setClosing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [dismissedStall, setDismissedStall] = useState<number | null>(null);
@@ -71,7 +72,7 @@ export function TabView({ tab, settings, available, stallSeq, details, onToggleD
               {tab.worker && (
                 <span className="pill" title={tab.worker.sessionId ? `session ${tab.worker.sessionId}` : 'no session yet'}>
                   <Glyph provider={tab.worker.provider} />
-                  {PROVIDER_NAMES[tab.worker.provider]} · {tab.worker.model ?? 'default model'}
+                  {PROVIDER_NAMES[tab.worker.provider]} · {modelLabel(catalog, tab.worker.provider, tab.worker.model)}
                 </span>
               )}
               <span className="sec" title={`Spent on this tab, ${costSource(tab.worker?.provider)}`}>
@@ -110,30 +111,24 @@ export function TabView({ tab, settings, available, stallSeq, details, onToggleD
           {switching && settled && (
             <div className="card inline-form">
               <span>Hand this tab to</span>
-              <ProviderSelect value={switchProvider} onChange={setSwitchProvider} available={available} ariaLabel="Switch provider" />
-              <input list="switch-models" value={switchModel} onChange={(e) => setSwitchModel(e.target.value)} placeholder="default model" aria-label="Switch model" />
-              <datalist id="switch-models">
-                {settings.models[switchProvider].map((m) => (
-                  <option key={m} value={m} />
-                ))}
-              </datalist>
+              <ModelPicker value={switchTo} onChange={setSwitchTo} catalog={catalog} available={available} ariaLabel="Switch to" />
               <button
                 className="primary"
                 disabled={busy}
                 onClick={() =>
                   void act(async () => {
-                    await api.switchWorker(tab.id, switchProvider, switchModel || null);
+                    await api.switchWorker(tab.id, switchTo.provider, switchTo.model);
                     setSwitching(false);
                   })
                 }
               >
-                {tab.worker?.provider === switchProvider ? 'Change model' : 'Switch'}
+                {tab.worker?.provider === switchTo.provider ? 'Change model' : 'Switch'}
               </button>
               <button className="quiet" onClick={() => setSwitching(false)}>
                 Cancel
               </button>
               <span className="muted sm">
-                {tab.worker?.provider === switchProvider ? 'Same provider: the session continues with the new model.' : 'A summary of the work so far is handed to the new worker; it carries on in the same checkout.'}
+                {tab.worker?.provider === switchTo.provider ? 'Same provider: the session continues with the new model.' : 'A summary of the work so far is handed to the new worker; it carries on in the same checkout.'}
               </span>
             </div>
           )}
@@ -189,7 +184,8 @@ export function TabView({ tab, settings, available, stallSeq, details, onToggleD
             items={tab.transcript}
             provider={tab.worker?.provider ?? null}
             pathBase={tab.projectRoot}
-            voteCard={tab.vote ? <VoteCard tab={tab} settings={settings} available={available} onStart={(pick) => act(() => api.start(tab.id, pick))} /> : undefined}
+            voteCard={tab.vote ? <VoteCard tab={tab} catalog={catalog} available={available} onStart={(pick) => act(() => api.start(tab.id, pick))} /> : undefined}
+            onPermission={(requestId: string, answer: PermissionAnswer) => act(() => api.answerPermission(requestId, answer))}
           />
 
           {!pinned && (
@@ -210,7 +206,9 @@ export function TabView({ tab, settings, available, stallSeq, details, onToggleD
           <Composer
             tab={tab}
             settings={settings}
+            catalog={catalog}
             available={available}
+            onPermissionMode={(mode: PermissionMode) => act(() => api.setPermissionMode(tab.id, mode))}
             onSubmit={(text: string, mode: SubmitMode, fullAuto: boolean) => act(() => api.submit(tab.id, text, mode, fullAuto))}
             onSend={(text: string) => act(() => api.send(tab.id, text))}
             onSwitch={(provider: Provider, model: string | null) => act(() => api.switchWorker(tab.id, provider, model))}

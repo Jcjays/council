@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
 import { costSource, formatUsd, PROVIDER_NAMES } from '../lib/format';
+import { modelLabel, sameWorker, type Pick } from '../lib/models';
 import { type Availability } from '../lib/routing';
-import type { CouncilResult, Provider, Settings, Tab } from '../types';
+import type { CouncilResult, ModelCatalog, Provider, Tab } from '../types';
 import { Glyph } from './Glyph';
-import { ProviderSelect } from './ProviderSelect';
+import { ModelPicker } from './ModelPicker';
 
 interface Props {
   tab: Tab;
-  settings: Settings;
+  catalog: ModelCatalog | null;
   available: Availability;
   onStart: (pick?: { provider: Provider; model: string | null }) => Promise<void>;
 }
@@ -21,24 +22,22 @@ export function tally(vote: CouncilResult): string {
 }
 
 /** The council's vote: expanded until the developer starts the worker, then a one-line summary that opens on click. */
-export function VoteCard({ tab, settings, available, onStart }: Props) {
+export function VoteCard({ tab, catalog, available, onStart }: Props) {
   const vote = tab.vote;
-  const [provider, setProvider] = useState<Provider>(tab.worker?.provider ?? 'gemini');
-  const [model, setModel] = useState<string>(tab.worker?.model ?? '');
+  const [pick, setPick] = useState<Pick>({ provider: tab.worker?.provider ?? 'gemini', model: tab.worker?.model ?? null });
   const [busy, setBusy] = useState(false);
   const [manual, setManual] = useState<boolean | null>(null);
   // The council's pick arrives after this card first renders; follow it until the developer starts the tab.
   useEffect(() => {
     if (tab.status === 'awaiting-start' && tab.worker) {
-      setProvider(tab.worker.provider);
-      setModel(tab.worker.model ?? '');
+      setPick({ provider: tab.worker.provider, model: tab.worker.model });
     }
   }, [tab.status, tab.worker?.provider, tab.worker?.model]);
   if (!vote) return null;
 
   const awaiting = tab.status === 'awaiting-start';
   const open = manual ?? awaiting;
-  const overridden = tab.worker && (provider !== tab.worker.provider || (model || null) !== tab.worker.model);
+  const overridden = tab.worker !== null && !sameWorker(pick, tab.worker);
   const voteCost = vote.seats.reduce((s, x) => s + x.costUsd, 0);
   const notes = tab.routing?.notes ?? [];
   const single = vote.seats.length === 1;
@@ -110,7 +109,7 @@ export function VoteCard({ tab, settings, available, onStart }: Props) {
                 <>
                   <Glyph provider={tab.worker.provider} />
                   <strong>
-                    {PROVIDER_NAMES[tab.worker.provider]} · {tab.worker.model ?? 'default model'}
+                    {PROVIDER_NAMES[tab.worker.provider]} · {modelLabel(catalog, tab.worker.provider, tab.worker.model)}
                   </strong>
                 </>
               ) : (
@@ -121,26 +120,20 @@ export function VoteCard({ tab, settings, available, onStart }: Props) {
             {awaiting && (
               <>
                 <span className="grow" />
-                <ProviderSelect value={provider} onChange={setProvider} available={available} ariaLabel="Worker provider" />
-                <input list={`models-${provider}`} value={model} onChange={(e) => setModel(e.target.value)} placeholder="default model" aria-label="Worker model" />
-                <datalist id={`models-${provider}`}>
-                  {settings.models[provider].map((m) => (
-                    <option key={m} value={m} />
-                  ))}
-                </datalist>
+                <ModelPicker value={pick} onChange={setPick} catalog={catalog} available={available} ariaLabel="Worker" />
                 <button
                   className="primary"
                   disabled={busy}
                   onClick={async () => {
                     setBusy(true);
                     try {
-                      await onStart(overridden ? { provider, model: model || null } : undefined);
+                      await onStart(overridden ? pick : undefined);
                     } finally {
                       setBusy(false);
                     }
                   }}
                 >
-                  {overridden ? `Start with ${PROVIDER_NAMES[provider]}` : 'Start'}
+                  {overridden ? `Start with ${PROVIDER_NAMES[pick.provider]}` : 'Start'}
                 </button>
               </>
             )}

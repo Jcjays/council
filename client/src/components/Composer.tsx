@@ -1,18 +1,23 @@
-import { useEffect, useState, type KeyboardEvent } from 'react';
-import { followUpSelection, selectionChangesWorker } from '../lib/composerMode';
+import { useState, type KeyboardEvent } from 'react';
+import { followUpSelection } from '../lib/composerMode';
 import { PROVIDER_NAMES } from '../lib/format';
-import { autoLabel, isSetUp, notSetUpTitle, type Availability } from '../lib/routing';
-import { PROVIDERS, type Provider, type Settings, type SubmitMode, type Tab } from '../types';
-import { Glyph } from './Glyph';
+import { sameWorker, type Pick } from '../lib/models';
+import { askModeNote, AUTO_NOTE } from '../lib/permissions';
+import { autoLabel, type Availability } from '../lib/routing';
+import type { ModelCatalog, PermissionMode, Provider, Settings, SubmitMode, Tab } from '../types';
+import { ModelPicker } from './ModelPicker';
 
 interface Props {
   tab: Tab;
   settings: Settings;
+  catalog: ModelCatalog | null;
   available: Availability;
   onSubmit: (text: string, mode: SubmitMode, fullAuto: boolean) => Promise<void>;
   onSend: (text: string) => Promise<void>;
-  /** A change of worker from the follow-up selector; behaves like the header's Switch worker. */
+  /** A change of worker from the follow-up picker; behaves like the header's Switch worker. */
   onSwitch: (provider: Provider, model: string | null) => Promise<void>;
+  /** Ask me or Auto for this tab, after the first message. */
+  onPermissionMode: (mode: PermissionMode) => Promise<void>;
 }
 
 function hintFor(tab: Tab): string {
@@ -32,21 +37,32 @@ function hintFor(tab: Tab): string {
   }
 }
 
-export function Composer({ tab, settings, available, onSubmit, onSend, onSwitch }: Props) {
+function PermissionSwitch({ mode, onChange, disabled, provider }: { mode: PermissionMode; onChange: (m: PermissionMode) => void; disabled?: boolean; provider: Provider | null }) {
+  const askTitle = provider ? askModeNote(provider) : 'Claude asks before running commands; Codex and Gemini stay in their sandboxes.';
+  return (
+    <span className="seg" role="radiogroup" aria-label="Permissions for this tab">
+      <button className={mode === 'ask' ? 'on' : ''} role="radio" aria-checked={mode === 'ask'} disabled={disabled} onClick={() => onChange('ask')} title={askTitle}>
+        Ask me
+      </button>
+      <button className={mode === 'auto' ? 'on danger-on' : ''} role="radio" aria-checked={mode === 'auto'} disabled={disabled} onClick={() => onChange('auto')} title={AUTO_NOTE}>
+        Auto
+      </button>
+    </span>
+  );
+}
+
+export function Composer({ tab, catalog, available, onSubmit, onSend, onSwitch, onPermissionMode }: Props) {
   const [text, setText] = useState('');
-  const [mode, setMode] = useState<'auto' | Provider>('auto');
-  const [model, setModel] = useState('');
-  const [fullAuto, setFullAuto] = useState(false);
+  /** null = Auto: the council votes. */
+  const [pick, setPick] = useState<Pick | null>(null);
+  const [permission, setPermission] = useState<PermissionMode>(tab.fullAuto ? 'auto' : 'ask');
   const [busy, setBusy] = useState(false);
 
   const drafting = tab.status === 'drafting';
   const canSend = drafting || tab.status === 'idle' || tab.status === 'failed';
   const current = followUpSelection(tab);
-  const [followModel, setFollowModel] = useState(current?.model ?? '');
-  // The selector reads as the current worker; keep the model field in step when the worker changes.
-  useEffect(() => setFollowModel(current?.model ?? ''), [current?.provider, current?.model]);
-  const modelChanged = current !== null && selectionChangesWorker(current, current.provider, followModel);
   const hint = hintFor(tab);
+  const tabMode: PermissionMode = tab.fullAuto ? 'auto' : 'ask';
 
   const go = async () => {
     const t = text.trim();
@@ -54,8 +70,8 @@ export function Composer({ tab, settings, available, onSubmit, onSend, onSwitch 
     setBusy(true);
     try {
       if (drafting) {
-        const m: SubmitMode = mode === 'auto' ? { kind: 'auto' } : { kind: 'manual', provider: mode, model: model || null };
-        await onSubmit(t, m, fullAuto);
+        const m: SubmitMode = pick ? { kind: 'manual', provider: pick.provider, model: pick.model } : { kind: 'auto' };
+        await onSubmit(t, m, permission === 'auto');
       } else {
         await onSend(t);
       }
@@ -72,75 +88,42 @@ export function Composer({ tab, settings, available, onSubmit, onSend, onSwitch 
     }
   };
 
-  const modelList = (provider: Provider, id: string) => (
-    <datalist id={id}>
-      {settings.models[provider].map((m) => (
-        <option key={m} value={m} />
-      ))}
-    </datalist>
-  );
-
-  const providerButton = (p: Provider, on: boolean, onClick: () => void, onTitle: string) => {
-    const ok = isSetUp(available, p);
-    return (
-      <button key={p} className={on ? 'on' : ''} onClick={onClick} role="radio" aria-checked={on} disabled={busy || (!ok && !on)} title={ok ? onTitle : notSetUpTitle(p)}>
-        <Glyph provider={p} />
-        {PROVIDER_NAMES[p]}
-        {!ok && <span className="muted xs">not set up</span>}
-      </button>
-    );
-  };
-
   return (
     <div className="composer">
       {drafting && (
         <div className="composer-row">
           <span className="seg" role="radiogroup" aria-label="Routing">
-            <button className={mode === 'auto' ? 'on' : ''} onClick={() => setMode('auto')} role="radio" aria-checked={mode === 'auto'} title="Council decides, from the providers that are set up">
+            <button className={pick === null ? 'on' : ''} onClick={() => setPick(null)} role="radio" aria-checked={pick === null} title="The council rates the task and routes it, among the CLIs that are set up">
               {autoLabel(available)}
             </button>
-            {PROVIDERS.map((p) => providerButton(p, mode === p, () => setMode(p), `Skip the vote and send to ${PROVIDER_NAMES[p]}`))}
           </span>
-          {mode !== 'auto' && (
-            <>
-              <input className="model" list="composer-models" value={model} onChange={(e) => setModel(e.target.value)} placeholder="default model" aria-label="Model" />
-              {modelList(mode, 'composer-models')}
-            </>
-          )}
+          <ModelPicker value={pick} onChange={setPick} catalog={catalog} available={available} ariaLabel="Send to a model directly" placeholder="or pick a model" disabled={busy} up />
           <span className="spacer" />
-          <label className="switch" title="Let the worker run shell commands without the allow-list (Claude --dangerously-skip-permissions, Gemini yolo, Codex no sandbox)">
-            <input type="checkbox" checked={fullAuto} onChange={(e) => setFullAuto(e.target.checked)} />
-            Full auto
-          </label>
+          <PermissionSwitch mode={permission} onChange={setPermission} disabled={busy} provider={pick?.provider ?? null} />
         </div>
       )}
       {!drafting && canSend && current && (
         <div className="composer-row">
-          <span className="seg" role="radiogroup" aria-label="Follow-up worker">
-            {PROVIDERS.map((p) =>
-              providerButton(
-                p,
-                current.provider === p,
-                () => {
-                  if (selectionChangesWorker(current, p, '')) void onSwitch(p, null);
-                },
-                current.provider === p ? 'The current worker' : `Hand the tab to ${PROVIDER_NAMES[p]}, like Switch worker`,
-              ),
-            )}
-          </span>
-          <input className="model" list="followup-models" value={followModel} onChange={(e) => setFollowModel(e.target.value)} placeholder="default model" aria-label="Follow-up model" />
-          {modelList(current.provider, 'followup-models')}
-          {modelChanged && (
-            <button className="link sm" disabled={busy} onClick={() => void onSwitch(current.provider, followModel.trim() || null)} title="The session continues with this model from the next message">
-              use this model
-            </button>
-          )}
+          <ModelPicker
+            value={current}
+            onChange={(next) => {
+              if (!sameWorker(next, current)) void onSwitch(next.provider, next.model);
+            }}
+            catalog={catalog}
+            available={available}
+            ariaLabel="Follow-up worker"
+            disabled={busy}
+            up
+          />
+          <span className="muted xs">another provider gets a hand-off summary; another model keeps the session</span>
           <span className="spacer" />
-          {tab.fullAuto && (
-            <span className="chip tone-danger" title="This tab runs without the command allow-list">
-              full auto
-            </span>
-          )}
+          <PermissionSwitch mode={tabMode} onChange={(m) => void onPermissionMode(m)} disabled={busy} provider={current.provider} />
+        </div>
+      )}
+      {!drafting && !canSend && tab.status === 'running' && (
+        <div className="composer-row">
+          <span className="spacer" />
+          <PermissionSwitch mode={tabMode} onChange={(m) => void onPermissionMode(m)} disabled={busy} provider={current?.provider ?? null} />
         </div>
       )}
       <div className="composer-box">
@@ -154,7 +137,7 @@ export function Composer({ tab, settings, available, onSubmit, onSend, onSwitch 
           aria-label="Message"
         />
         <button className="primary" onClick={() => void go()} disabled={!canSend || busy || !text.trim()}>
-          {drafting ? (mode === 'auto' ? 'Ask the council' : `Send to ${PROVIDER_NAMES[mode]}`) : 'Send'}
+          {drafting ? (pick ? `Send to ${PROVIDER_NAMES[pick.provider]}` : 'Ask the council') : 'Send'}
         </button>
       </div>
       <div className="composer-hint">

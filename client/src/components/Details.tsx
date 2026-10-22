@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { askModeNote, AUTO_NOTE, ruleLabel } from '../lib/permissions';
 import { basename, costSource, formatUsd, PROVIDER_NAMES, shortenPath } from '../lib/format';
 import { filesTouched } from '../lib/tools';
 import type { Tab, TabWorker } from '../types';
@@ -34,8 +35,16 @@ export function Details({ tab }: { tab: Tab }) {
               </span>
             </>
           )}
-          <span className="k">Mode</span>
-          <span className="v">{tab.fullAuto ? <span className="danger-text">full auto</span> : 'edits allowed, commands restricted'}</span>
+          <span className="k">Permissions</span>
+          <span className="v" title={tab.fullAuto ? AUTO_NOTE : tab.worker ? askModeNote(tab.worker.provider) : undefined}>
+            {tab.fullAuto ? <span className="danger-text">Auto</span> : 'Ask me'}
+          </span>
+          {(tab.allowedTools ?? []).length > 0 && (
+            <>
+              <span className="k">Allowed here</span>
+              <span className="v">{(tab.allowedTools ?? []).map(ruleLabel).join(', ')}</span>
+            </>
+          )}
         </div>
       </section>
 

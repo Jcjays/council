@@ -75,7 +75,7 @@ test('statusPhrase derives a phrase, with elapsed time while working', () => {
 
 test('tabChips lists risks and modes', () => {
   const t = tab({ status: 'running', stalled: true, fullAuto: true, escalations: 2, routing: { shiftedFrom: 'medium', reason: 'Codex budget exhausted' } });
-  expect(tabChips(t).map((c) => c.label)).toEqual(['stalled', 'rerouted', 'escalated ×2', 'full auto']);
+  expect(tabChips(t).map((c) => c.label)).toEqual(['stalled', 'rerouted', 'escalated ×2', 'auto']);
   expect(tabChips(tab({ escalations: 1 })).map((c) => c.label)).toEqual(['escalated']);
   expect(tabChips(tab())).toEqual([]);
 });
@@ -104,4 +104,22 @@ test('stepThrough wraps and starts from the ends when nothing is selected', () =
 
 test('laneCounts counts working and needs-you tabs', () => {
   expect(laneCounts([tab({ status: 'running' }), tab({ status: 'voting' }), tab({ status: 'idle' }), tab({ status: 'closed' })])).toEqual({ working: 2, needsYou: 1 });
+});
+
+test('a running worker waiting for a permission answer needs the developer, and says so', () => {
+  const waiting = tab({
+    status: 'running',
+    transcript: [
+      {
+        id: 'p',
+        ts: '2026-10-21T10:01:00Z',
+        kind: 'permission',
+        data: { id: 'r', toolName: 'Bash', input: {}, rule: 'Bash(ls:*)', action: 'run a command', detail: 'ls', status: 'pending' },
+      },
+    ],
+  });
+  expect(laneOf(waiting)).toBe('needs-you');
+  expect(statusPhrase(waiting)).toBe('Waiting for your OK');
+  expect(tabChips(waiting)).toContainEqual(expect.objectContaining({ label: 'asks first' }));
+  expect(tabChips(tab({ fullAuto: true }))).toContainEqual(expect.objectContaining({ label: 'auto', tone: 'danger' }));
 });

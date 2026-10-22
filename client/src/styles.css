@@ -1736,3 +1736,301 @@ table.plain input[type='number'] {
     display: none;
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* Model picker: one control wherever a worker is chosen              */
+/* ------------------------------------------------------------------ */
+.picker {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+}
+.picker-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  font-size: var(--fs-sm);
+  padding: 4px 8px;
+}
+.picker-trigger .picker-model {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.picker-trigger .caret {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+.price {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.picker-pop {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 4px);
+  left: 0;
+  width: min(460px, 86vw);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+  padding: 10px;
+  display: grid;
+  gap: 10px;
+}
+.picker-pop.up {
+  top: auto;
+  bottom: calc(100% + 4px);
+}
+.picker-group {
+  display: grid;
+  gap: 6px;
+}
+.picker-group.off {
+  opacity: 0.55;
+}
+.picker-group-h {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+.picker-group-h .xs {
+  font-weight: 400;
+  color: var(--text-3);
+}
+.model-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.model-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: var(--fs-sm);
+  background: var(--surface-2);
+}
+.model-chip.quiet {
+  color: var(--text-2);
+  border-style: dashed;
+}
+.model-chip.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+  font-weight: 600;
+}
+.picker-other {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+.picker-other input {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-sm);
+}
+.seg button.on.danger-on {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: var(--danger);
+}
+
+/* ------------------------------------------------------------------ */
+/* Settings sections                                                  */
+/* ------------------------------------------------------------------ */
+.settings > .advanced,
+.settings > .savebar {
+  margin: 0 18px;
+  max-width: 920px;
+}
+.tier-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.tier-row .tier {
+  width: 64px;
+  text-align: center;
+}
+.tier-row .tier-word {
+  width: 130px;
+}
+.seat-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.seat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  padding: 3px 4px 3px 10px;
+  font-size: var(--fs-sm);
+  background: var(--surface-2);
+}
+.seat-chip.off {
+  opacity: 0.55;
+}
+.chip-x {
+  border: none;
+  background: transparent;
+  color: var(--text-3);
+  padding: 0 6px;
+  font-size: var(--fs-md);
+  line-height: 1;
+}
+.chip-x:hover:not(:disabled) {
+  color: var(--danger);
+  background: transparent;
+}
+.perm-notes {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 4px;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+.toggles {
+  display: grid;
+  gap: 6px;
+}
+.toggles label {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.plan-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+}
+.plan-card {
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  padding: 8px 10px;
+  display: grid;
+  gap: 6px;
+  align-content: start;
+}
+.plan-card.off {
+  opacity: 0.6;
+}
+.plan-kind {
+  display: grid;
+  font-size: var(--fs-sm);
+}
+.prices-line {
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.money {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.money i {
+  font-style: normal;
+  color: var(--text-3);
+}
+.money input {
+  width: 90px;
+}
+.advanced {
+  display: grid;
+  gap: 10px;
+}
+.advanced-toggle {
+  justify-self: start;
+  border: none;
+  background: transparent;
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  font-weight: 600;
+  padding: 4px 0;
+}
+.advanced-toggle:hover:not(:disabled) {
+  background: transparent;
+  color: var(--accent);
+}
+.advanced-body {
+  display: grid;
+  gap: 12px;
+}
+.savebar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+.savebar.is-dirty {
+  border-color: color-mix(in srgb, var(--warn) 50%, transparent);
+  background: color-mix(in srgb, var(--warn) 8%, var(--surface));
+}
+.savebar .dirty {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+/* ------------------------------------------------------------------ */
+/* Permission requests in the transcript                              */
+/* ------------------------------------------------------------------ */
+.item-permission .perm-detail {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--surface-2);
+  border-radius: var(--r-sm);
+  padding: 6px 8px;
+}
+.item-permission.done {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  min-width: 0;
+}
+.item-permission.done code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.item-permission.done.allowed b {
+  color: var(--ok);
+}
+.item-permission.done.denied b {
+  color: var(--danger);
+}
+.settings .card > .seg {
+  align-self: flex-start;
+}

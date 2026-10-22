@@ -1,5 +1,6 @@
 import type { Tab, TranscriptItem } from '../types';
 import { elapsed } from './format';
+import { pendingPermission } from './permissions';
 
 /**
  * Where a tab sits from the developer's point of view (an idea from
@@ -12,7 +13,12 @@ export const LANE_LABELS: Record<Lane, string> = { 'needs-you': 'Needs you', wor
 
 export type Tone = 'accent' | 'warn' | 'danger' | 'muted' | 'ok';
 
-type LaneTab = Pick<Tab, 'status' | 'stalled'>;
+/** The transcript is optional: without it a waiting permission request cannot be seen. */
+type LaneTab = Pick<Tab, 'status' | 'stalled'> & Partial<Pick<Tab, 'transcript'>>;
+
+function waitingForOk(tab: LaneTab): boolean {
+  return tab.status === 'running' && tab.transcript !== undefined && pendingPermission({ transcript: tab.transcript }) !== null;
+}
 
 export function laneOf(tab: LaneTab): Lane {
   switch (tab.status) {
@@ -22,7 +28,7 @@ export function laneOf(tab: LaneTab): Lane {
     case 'handing-off':
       return 'working';
     case 'running':
-      return tab.stalled ? 'needs-you' : 'working';
+      return tab.stalled || waitingForOk(tab) ? 'needs-you' : 'working';
     case 'awaiting-start':
     case 'idle':
     case 'failed':
@@ -69,6 +75,7 @@ export function statusPhrase(tab: Pick<Tab, 'status' | 'stalled' | 'transcript' 
     case 'awaiting-start':
       return 'Ready to start';
     case 'running': {
+      if (waitingForOk(tab)) return 'Waiting for your OK';
       if (tab.stalled) return 'No output for a while';
       const since = new Date(turnStart(tab)).getTime();
       return Number.isNaN(since) ? 'Working' : `Working for ${elapsed(now.getTime() - since)}`;
@@ -91,12 +98,13 @@ export interface Chip {
 }
 
 /** Risk and mode chips for a tab (an idea from Hydra's risk signals). */
-export function tabChips(tab: Pick<Tab, 'status' | 'stalled' | 'fullAuto' | 'routing' | 'escalations'>): Chip[] {
+export function tabChips(tab: Pick<Tab, 'status' | 'stalled' | 'fullAuto' | 'routing' | 'escalations'> & Partial<Pick<Tab, 'transcript'>>): Chip[] {
   const chips: Chip[] = [];
+  if (waitingForOk(tab)) chips.push({ label: 'asks first', tone: 'warn', title: 'The worker is waiting for you to allow or deny something' });
   if (tab.stalled && tab.status === 'running') chips.push({ label: 'stalled', tone: 'warn', title: 'No output for a while; the worker may be stuck' });
   if (tab.routing?.shiftedFrom) chips.push({ label: 'rerouted', tone: 'warn', title: tab.routing.reason ?? `Routed away from the ${tab.routing.shiftedFrom} tier` });
   if (tab.escalations > 0) chips.push({ label: tab.escalations === 1 ? 'escalated' : `escalated ×${tab.escalations}`, tone: 'accent', title: 'Handed up a tier after a failure' });
-  if (tab.fullAuto) chips.push({ label: 'full auto', tone: 'danger', title: 'Runs without the command allow-list' });
+  if (tab.fullAuto) chips.push({ label: 'auto', tone: 'danger', title: 'Permissions: Auto. The worker runs without asking and without a sandbox' });
   return chips;
 }
 
