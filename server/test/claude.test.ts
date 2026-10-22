@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { expect, test } from 'vitest';
 import { buildClaudeArgs, parseClaudeLine } from '../src/adapters/claude.js';
 import type { AdapterEvent, RunOptions } from '../src/adapters/types.js';
@@ -9,56 +10,58 @@ const base: RunOptions = {
   model: 'claude-sonnet-5-5',
   purpose: 'work',
   fullAuto: false,
-  allowedCommands: ['Bash(npm test*)'],
 };
+const bridge = { url: 'http://127.0.0.1:4318', tabId: 'tab-1', token: 'secret' };
 
-test('work args: print mode, stream-json, model, resume, acceptEdits and allowed tools', () => {
+function flag(args: string[], name: string): string | undefined {
+  const i = args.indexOf(name);
+  return i >= 0 ? args[i + 1] : undefined;
+}
+
+test('work args: print mode, stream-json, model, resume and acceptEdits', () => {
   const s = buildClaudeArgs({ ...base, resumeId: 'abc' });
   expect(s.cmd).toBe('claude');
   expect(s.args).toEqual(
-    expect.arrayContaining([
-      '-p',
-      '--output-format',
-      'stream-json',
-      '--verbose',
-      '--model',
-      'claude-sonnet-5-5',
-      '--resume',
-      'abc',
-      '--permission-mode',
-      'acceptEdits',
-      '--allowedTools',
-      'Bash(npm test*)',
-    ]),
+    expect.arrayContaining(['-p', '--output-format', 'stream-json', '--verbose', '--model', 'claude-sonnet-5-5', '--resume', 'abc', '--permission-mode', 'acceptEdits']),
   );
   expect(s.args).not.toContain('--dangerously-skip-permissions');
+  expect(s.args).not.toContain('--allowedTools');
   expect(s.stdin).toBe('do it');
 });
 
-test('fullAuto uses --dangerously-skip-permissions instead of acceptEdits', () => {
-  const s = buildClaudeArgs({ ...base, fullAuto: true });
+test('ask mode sends every permission prompt to the Council tool for this tab', () => {
+  const s = buildClaudeArgs({ ...base, permissions: bridge });
+  expect(flag(s.args, '--permission-mode')).toBe('acceptEdits');
+  expect(flag(s.args, '--permission-prompt-tool')).toBe('mcp__council__approve');
+  const config = JSON.parse(flag(s.args, '--mcp-config') ?? '{}');
+  const server = config.mcpServers.council;
+  expect(server).toMatchObject({ type: 'stdio', command: process.execPath });
+  expect(server.args).toEqual([expect.stringMatching(/permission-tool.(ts|js)$/)]);
+  expect(fs.existsSync(server.args[0])).toBe(true);
+  expect(server.env).toEqual({ COUNCIL_URL: bridge.url, COUNCIL_TAB_ID: 'tab-1', COUNCIL_PERMISSION_TOKEN: 'secret' });
+});
+
+test('fullAuto uses --dangerously-skip-permissions and asks nobody', () => {
+  const s = buildClaudeArgs({ ...base, fullAuto: true, permissions: bridge });
   expect(s.args).toContain('--dangerously-skip-permissions');
   expect(s.args).not.toContain('--permission-mode');
-  expect(s.args).not.toContain('--allowedTools');
+  expect(s.args).not.toContain('--mcp-config');
+  expect(s.args).not.toContain('--permission-prompt-tool');
 });
 
 test('vote args disable tools, cap budget, pass the json schema and skip persistence', () => {
-  const s = buildClaudeArgs({ ...base, purpose: 'vote', model: 'claude-haiku-5-5', jsonSchema: { type: 'object' } });
+  const s = buildClaudeArgs({ ...base, purpose: 'vote', model: 'claude-haiku-5-5', jsonSchema: { type: 'object' }, permissions: bridge });
   expect(s.args).toEqual(
     expect.arrayContaining(['--tools', '', '--no-session-persistence', '--max-budget-usd', '0.05', '--json-schema', '{"type":"object"}']),
   );
   expect(s.args).not.toContain('--permission-mode');
+  expect(s.args).not.toContain('--mcp-config');
   expect(s.args).not.toContain('--resume');
 });
 
 test('null model omits --model', () => {
   const s = buildClaudeArgs({ ...base, model: null });
   expect(s.args).not.toContain('--model');
-});
-
-test('no allowed commands omits --allowedTools', () => {
-  const s = buildClaudeArgs({ ...base, allowedCommands: [] });
-  expect(s.args).not.toContain('--allowedTools');
 });
 
 test('parses the recorded work stream into session, tool, tool_result, text and result events', () => {

@@ -106,7 +106,6 @@ test('auto submit: council votes, tab waits for start, then the worker streams t
   const workCall = adapters.gemini.calls.find((c) => c.purpose === 'work');
   expect(workCall).toMatchObject({ cwd: 'C:/proj', model: 'flash', prompt: 'Rename foo to bar in src/a.ts', fullAuto: false });
   expect(workCall?.resumeId).toBeUndefined();
-  expect(workCall?.allowedCommands).toEqual(DEFAULT_SETTINGS.allowedCommands);
 });
 
 test('autoStart skips the pause and runs straight after the vote', async () => {

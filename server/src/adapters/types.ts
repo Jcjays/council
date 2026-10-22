@@ -14,6 +14,13 @@ export interface Usage {
 
 export const ZERO_USAGE: Usage = { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 };
 
+/** How a worker's permission tool reaches Council: the server, the tab, and a token for this run. */
+export interface PermissionBridge {
+  url: string;
+  tabId: string;
+  token: string;
+}
+
 /** Hard cap passed to Claude for a council vote, in USD. */
 export const VOTE_MAX_BUDGET_USD = 0.05;
 
@@ -24,9 +31,10 @@ export interface RunOptions {
   model: string | null;
   purpose: Purpose;
   resumeId?: string;
+  /** Auto mode: no prompts, no sandbox. Otherwise edits are allowed and anything else asks (Claude) or stays in the CLI's sandbox (Codex, Gemini). */
   fullAuto: boolean;
-  /** Claude `--allowedTools` entries, e.g. `Bash(npm test*)`. Ignored by other CLIs. */
-  allowedCommands: string[];
+  /** Where Claude's permission prompts go in ask mode. Ignored by other CLIs. */
+  permissions?: PermissionBridge;
   signal?: AbortSignal;
   /** JSON schema the answer must match (votes). */
   jsonSchema?: Record<string, unknown>;

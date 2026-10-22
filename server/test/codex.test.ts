@@ -12,7 +12,6 @@ const base: RunOptions = {
   model: 'gpt-x',
   purpose: 'work',
   fullAuto: false,
-  allowedCommands: [],
 };
 
 test('work args: exec with json, cwd, workspace-write sandbox, model, prompt on stdin', () => {

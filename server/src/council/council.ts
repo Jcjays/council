@@ -83,7 +83,6 @@ async function runSeat(seat: Seat, a: CouncilArgs, prompt: string): Promise<Seat
       model: seat.model,
       purpose: 'vote',
       fullAuto: false,
-      allowedCommands: [],
       signal: ac.signal,
       jsonSchema: VOTE_JSON_SCHEMA,
       env: a.env,

@@ -402,7 +402,6 @@ export class TaskEngine extends EventEmitter {
         purpose: 'work',
         resumeId: worker.sessionId ?? undefined,
         fullAuto: tab.fullAuto,
-        allowedCommands: s.allowedCommands,
         signal: run.ac.signal,
       });
       for await (const ev of events) {
@@ -553,7 +552,6 @@ export class TaskEngine extends EventEmitter {
         model: seat.model,
         purpose: 'summarize',
         fullAuto: false,
-        allowedCommands: [],
         signal: AbortSignal.timeout(s.seatTimeoutMs),
       });
       for await (const ev of events) {

@@ -12,7 +12,6 @@ const base: RunOptions = {
   model: 'flash',
   purpose: 'work',
   fullAuto: false,
-  allowedCommands: ['Bash(npm test*)'],
 };
 
 test('work args: stream-json, model, auto_edit approval, prompt on stdin', () => {

@@ -51,7 +51,7 @@ test('seats run tool-less votes with the vote prompt and the JSON schema', async
   const { promise } = run(g, new FakeAdapter('codex', { events: voteEvents('easy') }), new FakeAdapter('claude', { events: voteEvents('easy') }));
   await promise;
   expect(g.calls).toHaveLength(1);
-  expect(g.calls[0]).toMatchObject({ purpose: 'vote', model: 'flash', cwd: 'C:/w', fullAuto: false, allowedCommands: [], jsonSchema: VOTE_JSON_SCHEMA });
+  expect(g.calls[0]).toMatchObject({ purpose: 'vote', model: 'flash', cwd: 'C:/w', fullAuto: false, jsonSchema: VOTE_JSON_SCHEMA });
   expect(g.calls[0]?.prompt).toContain('rename x to y');
   expect(g.calls[0]?.prompt).toContain('Top-level: src/');
 });

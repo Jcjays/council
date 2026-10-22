@@ -1,3 +1,4 @@
+import { PERMISSION_TOOL, permissionMcpConfig } from '../mcp/launch.js';
 import type { JsonObject } from './jsonl.js';
 import { runCli } from './run.js';
 import { resolveCommand } from './spawn.js';
@@ -21,8 +22,9 @@ function quotaFromRateLimit(o: JsonObject): AdapterEvent[] {
 }
 
 /**
- * Claude Code in print mode. Work runs edit freely but shell commands are limited
- * to the allow-list unless fullAuto; votes and summaries run tool-less and capped.
+ * Claude Code in print mode. Work runs accept edits and send every other
+ * permission prompt to Council's MCP tool, which asks the developer; Auto mode
+ * skips permissions. Votes and summaries run tool-less and capped.
  */
 export function buildClaudeArgs(o: RunOptions): CliSpec {
   const args = ['-p', '--output-format', 'stream-json', '--verbose'];
@@ -34,7 +36,7 @@ export function buildClaudeArgs(o: RunOptions): CliSpec {
       args.push('--dangerously-skip-permissions');
     } else {
       args.push('--permission-mode', 'acceptEdits');
-      if (o.allowedCommands.length > 0) args.push('--allowedTools', ...o.allowedCommands);
+      if (o.permissions) args.push('--mcp-config', permissionMcpConfig(o.permissions), '--permission-prompt-tool', PERMISSION_TOOL);
     }
   } else {
     args.push('--tools', '', '--no-session-persistence', '--max-budget-usd', String(VOTE_MAX_BUDGET_USD));
