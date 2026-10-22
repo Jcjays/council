@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { detectAuth, probeVersion } from '../src/adapters/health.js';
+import { claudePlanGuess, codexPlanFromLoginStatus, detectAuth, geminiPlan, probeVersion } from '../src/adapters/health.js';
 import { checkAll } from '../src/adapters/index.js';
 import type { Adapter, CliHealth, Provider } from '../src/adapters/types.js';
 
@@ -53,4 +53,29 @@ test('detectAuth reports none when nothing is found, except Claude on macOS (key
   expect(detectAuth('claude', {}, () => false, 'win32')).toEqual({ authed: false, source: 'none' });
   expect(detectAuth('gemini', {}, () => false, 'darwin')).toEqual({ authed: false, source: 'none' });
   expect(detectAuth('claude', {}, () => false, 'darwin')).toEqual({ authed: true, source: 'unknown' });
+});
+
+test('codex login status tells a ChatGPT plan from an API key (it prints to stderr)', () => {
+  expect(codexPlanFromLoginStatus('Logged in using ChatGPT\n', 0)).toEqual({ kind: 'subscription', label: 'ChatGPT plan', confirmed: true });
+  expect(codexPlanFromLoginStatus('Logged in using an API key - sk-proj-***ABCD\n', 0)).toEqual({ kind: 'api-key', label: 'OpenAI API key', confirmed: true });
+  expect(codexPlanFromLoginStatus('Not logged in\n', 1)).toBeUndefined();
+  expect(codexPlanFromLoginStatus('error: unexpected argument', 2)).toBeUndefined();
+});
+
+test('Gemini: an API key or Vertex is metered, a Google sign-in is the account quota', () => {
+  const none = () => false;
+  expect(geminiPlan({ GEMINI_API_KEY: 'k' }, undefined, none)).toEqual({ kind: 'api-key', label: 'Gemini API key', confirmed: false });
+  expect(geminiPlan({ GOOGLE_GENAI_USE_VERTEXAI: 'true' }, undefined, none)).toEqual({ kind: 'api-key', label: 'Vertex AI (Google Cloud billing)', confirmed: false });
+  expect(geminiPlan({}, { security: { auth: { selectedType: 'gemini-api-key' } } }, none)?.kind).toBe('api-key');
+  expect(geminiPlan({}, { security: { auth: { selectedType: 'vertex-ai' } } }, none)?.kind).toBe('api-key');
+  expect(geminiPlan({}, { security: { auth: { selectedType: 'oauth-personal' } } }, none)).toEqual({ kind: 'subscription', label: 'Google account (Gemini Code Assist quota)', confirmed: false });
+  expect(geminiPlan({}, { selectedAuthType: 'oauth-personal' }, none)?.kind).toBe('subscription');
+  expect(geminiPlan({}, undefined, (p) => p.endsWith('oauth_creds.json'))?.kind).toBe('subscription');
+  expect(geminiPlan({}, undefined, none)).toBeUndefined();
+});
+
+test('Claude before any run: an API key in the environment, else a sign-in that is probably the subscription', () => {
+  expect(claudePlanGuess({ ANTHROPIC_API_KEY: 'k' }, 'login')).toEqual({ kind: 'api-key', label: 'API key (ANTHROPIC_API_KEY)', confirmed: false });
+  expect(claudePlanGuess({}, 'login')).toEqual({ kind: 'subscription', label: 'Claude subscription', confirmed: false });
+  expect(claudePlanGuess({}, 'none')).toBeUndefined();
 });

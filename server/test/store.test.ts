@@ -59,3 +59,11 @@ test('listProjects returns the project ids that have tabs', async () => {
   await s.save(newTab(s, 'C:/b', 'y'));
   expect((await s.listProjects()).sort()).toEqual([s.projectId('C:/a'), s.projectId('C:/b')].sort());
 });
+
+test('many overlapping saves of one tab all succeed and the last one wins', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'council-store-race-'));
+  const store = new TabStore(dir);
+  const tab = newTab(store, 'C:/proj', 'race');
+  await Promise.all(Array.from({ length: 40 }, (_, i) => store.save({ ...tab, title: `v${i}` })));
+  expect((await store.load(tab.projectId, tab.id))?.title).toBe('v39');
+});

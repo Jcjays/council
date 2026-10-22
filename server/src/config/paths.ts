@@ -12,6 +12,8 @@ export interface CouncilPaths {
   home: string;
   settings: string;
   pricing: string;
+  /** Observed plans and usage windows per provider. */
+  usage: string;
   ledger: string;
   projects: string;
 }
@@ -21,6 +23,7 @@ export function paths(home: string = councilHome()): CouncilPaths {
     home,
     settings: path.join(home, 'settings.json'),
     pricing: path.join(home, 'pricing.json'),
+    usage: path.join(home, 'usage.json'),
     ledger: path.join(home, 'ledger.jsonl'),
     projects: path.join(home, 'projects'),
   };

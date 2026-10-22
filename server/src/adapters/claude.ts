@@ -2,7 +2,7 @@ import { PERMISSION_TOOL, permissionMcpConfig } from '../mcp/launch.js';
 import type { JsonObject } from './jsonl.js';
 import { runCli } from './run.js';
 import { resolveCommand } from './spawn.js';
-import { isoFromEpoch, num, VOTE_MAX_BUDGET_USD, type AdapterEvent, type CliSpec, type QuotaWindow, type RunOptions } from './types.js';
+import { isoFromEpoch, num, PROBE_MAX_BUDGET_USD, VOTE_MAX_BUDGET_USD, type AdapterEvent, type CliSpec, type ProviderPlan, type QuotaWindow, type RunOptions } from './types.js';
 
 const CLAUDE_WINDOW_NAMES: Record<string, string> = { five_hour: '5-hour', seven_day: '7-day' };
 
@@ -39,11 +39,19 @@ export function buildClaudeArgs(o: RunOptions): CliSpec {
       if (o.permissions) args.push('--mcp-config', permissionMcpConfig(o.permissions), '--permission-prompt-tool', PERMISSION_TOOL);
     }
   } else {
-    args.push('--tools', '', '--no-session-persistence', '--max-budget-usd', String(VOTE_MAX_BUDGET_USD));
+    const cap = o.purpose === 'probe' ? PROBE_MAX_BUDGET_USD : VOTE_MAX_BUDGET_USD;
+    args.push('--tools', '', '--no-session-persistence', '--max-budget-usd', String(cap));
     if (o.jsonSchema) args.push('--json-schema', JSON.stringify(o.jsonSchema));
   }
 
   return { cmd: resolveCommand('claude'), args, stdin: o.prompt };
+}
+
+/** `apiKeySource` of the init event: "none" means Claude Code runs on the signed-in subscription. */
+export function claudePlanFromInit(apiKeySource: string): ProviderPlan {
+  return apiKeySource === 'none'
+    ? { kind: 'subscription', label: 'Claude subscription', confirmed: true }
+    : { kind: 'api-key', label: `API key (${apiKeySource})`, confirmed: true };
 }
 
 function blocksToText(content: unknown): string {
@@ -63,8 +71,13 @@ function contentBlocks(o: JsonObject): JsonObject[] {
 
 export function parseClaudeLine(o: JsonObject): AdapterEvent[] {
   switch (o.type) {
-    case 'system':
-      return o.subtype === 'init' && typeof o.session_id === 'string' ? [{ type: 'session', id: o.session_id }] : [];
+    case 'system': {
+      if (o.subtype !== 'init') return [];
+      const out: AdapterEvent[] = [];
+      if (typeof o.session_id === 'string') out.push({ type: 'session', id: o.session_id });
+      if (typeof o.apiKeySource === 'string') out.push({ type: 'account', plan: claudePlanFromInit(o.apiKeySource) });
+      return out;
+    }
 
     case 'rate_limit_event':
       return quotaFromRateLimit(o);

@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { PROVIDERS, TIER_ORDER, type Adapter, type CliHealth, type Provider, type QuotaWindow, type ResultEvent, type Tier } from '../adapters/types.js';
+import { PROVIDERS, TIER_ORDER, type Adapter, type CliHealth, type Provider, type ProviderPlan, type QuotaWindow, type ResultEvent, type Tier } from '../adapters/types.js';
 import { effectiveSettings, type PermissionMode, type Settings } from '../config/settings.js';
 import { runCouncil, type Seat } from '../council/council.js';
 import { effectiveRouting, type EffectiveRouting } from '../council/effective.js';
@@ -8,6 +8,7 @@ import { route } from '../council/routing.js';
 import { repoSnapshot } from '../council/snapshot.js';
 import { budgetState, type BudgetState, type ProviderUsage } from '../ledger/budget.js';
 import { appendEntry, currentPeriod, readEntries, sumPeriod } from '../ledger/ledger.js';
+import { UsageStore } from '../ledger/usage.js';
 import { costFor, lookupPrice, type PriceTable } from '../ledger/pricing.js';
 import type { Decision } from '../mcp/permission-tool.js';
 import { diffStat as gitDiffStat } from '../worktrees/git.js';
@@ -29,9 +30,20 @@ export interface EngineDeps {
   /** Latest CLI health; providers reported as not installed are routed around. */
   health?: () => Partial<Record<Provider, CliHealth>>;
   snapshot?: (cwd: string) => Promise<string>;
+  /** Observed plans and usage windows; memory-only when omitted. */
+  usage?: UsageStore;
   /** Base URL of this Council server, for the permission tool a Claude worker runs. Unset: Claude cannot ask and is limited to edits. */
   permissionUrl?: () => string | undefined;
   now?: () => Date;
+}
+
+/** CLIs whose runs report usage windows, so a probe can refresh them. */
+const PROBED: Provider[] = ['claude', 'codex'];
+
+export interface UsageRefresh {
+  probed: Provider[];
+  skipped: { provider: Provider; reason: string }[];
+  budgets: Record<Provider, BudgetState>;
 }
 
 export type SubmitMode = { kind: 'auto' } | { kind: 'manual'; provider: Provider; model: string | null };
@@ -106,12 +118,13 @@ export class TaskEngine extends EventEmitter {
   private readonly runs = new Map<string, ActiveRun>();
   private readonly saveTimers = new Map<string, NodeJS.Timeout>();
   private readonly permissions = new Map<string, PendingPermission>();
-  private readonly usageByProvider: Partial<Record<Provider, ProviderUsage>> = {};
+  private readonly observed: UsageStore;
   private readonly now: () => Date;
 
   constructor(private readonly deps: EngineDeps) {
     super();
     this.now = deps.now ?? (() => new Date());
+    this.observed = deps.usage ?? new UsageStore();
   }
 
   // ---- queries -------------------------------------------------------------
@@ -152,16 +165,15 @@ export class TaskEngine extends EventEmitter {
     const sums = sumPeriod(entries, start, end);
     return Object.fromEntries(
       PROVIDERS.map((p) => {
-        const state = budgetState(p, sums[p], s.budgets[p] ?? 0, s.warnPct);
-        const usage = this.usageByProvider[p];
-        return [p, usage ? { ...state, usage } : state];
+        const plan = this.observed.plan(p) ?? this.deps.health?.()[p]?.plan;
+        return [p, budgetState(p, sums[p], s.spendCaps[p] ?? 0, s.warnPct, { plan, usage: this.observed.usage(p), now: this.now() })];
       }),
     ) as Record<Provider, BudgetState>;
   }
 
-  /** Latest plan-usage windows per provider, as their CLIs reported them during runs. */
+  /** Latest plan-usage windows per provider, as their CLIs reported them. */
   usage(): Partial<Record<Provider, ProviderUsage>> {
-    return { ...this.usageByProvider };
+    return Object.fromEntries(PROVIDERS.flatMap((p) => (this.observed.usage(p) ? [[p, this.observed.usage(p)]] : [])));
   }
 
   /** The council and tier map in force given which CLIs are set up. */
@@ -170,10 +182,61 @@ export class TaskEngine extends EventEmitter {
     return effectiveRouting(s, this.availableProviders());
   }
 
+  /**
+   * Runs the cheapest possible request on each set-up CLI that reports usage
+   * windows (Claude, Codex), to read the plan and fresh windows. Each costs a
+   * fraction of a cent and is ledgered as `probe`.
+   */
+  async refreshUsage(): Promise<UsageRefresh> {
+    const s = this.deps.settings();
+    const available = this.availableProviders();
+    const probed: Provider[] = [];
+    const skipped: UsageRefresh['skipped'] = [];
+    await Promise.all(
+      PROVIDERS.map(async (p) => {
+        if (!available.includes(p)) return void skipped.push({ provider: p, reason: 'not set up' });
+        if (!PROBED.includes(p)) return void skipped.push({ provider: p, reason: 'Gemini CLI does not report usage windows' });
+        const model = s.models[p]?.[0] ?? null;
+        try {
+          const events = this.deps.adapters[p].run({
+            cwd: process.cwd(),
+            prompt: 'Reply with the single word ok.',
+            model,
+            purpose: 'probe',
+            fullAuto: false,
+            signal: AbortSignal.timeout(s.seatTimeoutMs),
+          });
+          for await (const ev of events) {
+            if (ev.type === 'quota') this.noteUsage(p, ev.windows);
+            else if (ev.type === 'account') this.notePlan(p, ev.plan);
+            else if (ev.type === 'result') {
+              const costUsd = ev.costUsd ?? costFor(p, model, ev.usage, this.deps.pricing());
+              await appendEntry(this.deps.ledgerFile, { ts: this.now().toISOString(), provider: p, model, purpose: 'probe', tabId: '', projectId: '', usage: ev.usage, costUsd });
+              this.emit('ledger', { tabId: '', provider: p, costUsd });
+            }
+          }
+          probed.push(p);
+        } catch (err) {
+          skipped.push({ provider: p, reason: err instanceof Error ? err.message : String(err) });
+        }
+      }),
+    );
+    const order = (a: { provider: Provider } | Provider, b: { provider: Provider } | Provider) =>
+      PROVIDERS.indexOf(typeof a === 'string' ? a : a.provider) - PROVIDERS.indexOf(typeof b === 'string' ? b : b.provider);
+    return { probed: probed.sort(order), skipped: skipped.sort(order), budgets: await this.budgets() };
+  }
+
   private noteUsage(provider: Provider, windows: QuotaWindow[]): void {
     const usage: ProviderUsage = { windows, observedAt: this.now().toISOString() };
-    this.usageByProvider[provider] = usage;
+    this.observed.noteUsage(provider, usage);
     this.emit('quota', { provider, usage });
+  }
+
+  private notePlan(provider: Provider, plan: ProviderPlan): void {
+    const known = this.observed.plan(provider);
+    if (known && known.kind === plan.kind && known.label === plan.label && known.confirmed === plan.confirmed) return;
+    this.observed.notePlan(provider, plan);
+    this.emit('quota', { provider });
   }
 
   // ---- commands ------------------------------------------------------------
@@ -494,6 +557,7 @@ export class TaskEngine extends EventEmitter {
         await this.record(tab, provider, model, 'vote', ev);
       },
       onQuota: (provider, windows) => this.noteUsage(provider, windows),
+      onAccount: (provider, plan) => this.notePlan(provider, plan),
     });
     if (isClosed(tab)) return;
 
@@ -565,6 +629,9 @@ export class TaskEngine extends EventEmitter {
             break;
           case 'quota':
             this.noteUsage(worker.provider, ev.windows);
+            break;
+          case 'account':
+            this.notePlan(worker.provider, ev.plan);
             break;
           case 'text':
             this.addItem(tab, 'assistant', ev.text);
@@ -709,6 +776,7 @@ export class TaskEngine extends EventEmitter {
       for await (const ev of events) {
         if (ev.type === 'text') text += ev.text;
         if (ev.type === 'quota') this.noteUsage(seat.provider, ev.windows);
+        if (ev.type === 'account') this.notePlan(seat.provider, ev.plan);
         if (ev.type === 'result') {
           await this.record(tab, seat.provider, seat.model, 'summarize', ev);
           if (ev.isError) return mechanicalSummary(tab.transcript);

@@ -9,6 +9,8 @@ export function newId(): string {
 
 /** Tabs live at `<projectsDir>/<projectId>/tabs/<tabId>.json`. */
 export class TabStore {
+  private readonly saving = new Map<string, Promise<void>>();
+
   constructor(public readonly projectsDir: string) {}
 
   /** Stable 12-hex id for a checkout path; case-insensitive on Windows. */
@@ -26,12 +28,22 @@ export class TabStore {
     return path.join(this.tabsDir(projectId), `${tabId}.json`);
   }
 
-  async save(tab: Tab): Promise<void> {
+  /** Saves to one file run one after another: overlapping temp-file renames fail on Windows. */
+  save(tab: Tab): Promise<void> {
     const file = this.file(tab.projectId, tab.id);
-    await fs.mkdir(path.dirname(file), { recursive: true });
-    const tmp = `${file}.${process.pid}.tmp`;
-    await fs.writeFile(tmp, JSON.stringify(tab), 'utf8');
-    await fs.rename(tmp, file);
+    const text = JSON.stringify(tab);
+    const write = async () => {
+      await fs.mkdir(path.dirname(file), { recursive: true });
+      const tmp = `${file}.${process.pid}.tmp`;
+      await fs.writeFile(tmp, text, 'utf8');
+      await fs.rename(tmp, file);
+    };
+    const next = (this.saving.get(file) ?? Promise.resolve()).then(write, write);
+    this.saving.set(file, next);
+    void next.finally(() => {
+      if (this.saving.get(file) === next) this.saving.delete(file);
+    }).catch(() => {});
+    return next;
   }
 
   async load(projectId: string, tabId: string): Promise<Tab | null> {

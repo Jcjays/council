@@ -23,6 +23,7 @@ test('paths derive files from home', () => {
   expect(p.home).toBe('/x');
   expect(p.settings).toBe(path.join('/x', 'settings.json'));
   expect(p.pricing).toBe(path.join('/x', 'pricing.json'));
+  expect(p.usage).toBe(path.join('/x', 'usage.json'));
   expect(p.ledger).toBe(path.join('/x', 'ledger.jsonl'));
   expect(p.projects).toBe(path.join('/x', 'projects'));
 });

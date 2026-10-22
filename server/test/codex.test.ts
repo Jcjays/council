@@ -102,3 +102,15 @@ test('a rate_limits snapshot becomes a quota event ahead of the result', () => {
 test('top-level error events map to error', () => {
   expect(parseCodexLine({ type: 'error', message: 'boom' })).toEqual([{ type: 'error', message: 'boom' }]);
 });
+
+test('a rate_limits snapshot that names the plan yields the account kind', () => {
+  const parse = createCodexParser();
+  const events = parse({
+    type: 'token_count',
+    rate_limits: { primary: { used_percent: 12, window_minutes: 300, resets_at: 1792563000 }, plan_type: 'plus' },
+  });
+  expect(events).toEqual([
+    { type: 'quota', windows: [{ name: '5-hour', usedPct: 0.12, resetsAt: new Date(1792563000 * 1000).toISOString() }] },
+    { type: 'account', plan: { kind: 'subscription', label: 'ChatGPT Plus', confirmed: true } },
+  ]);
+});

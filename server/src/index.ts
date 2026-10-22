@@ -7,6 +7,7 @@ import { paths } from './config/paths.js';
 import { SettingsStore } from './config/settings.js';
 import { createServer } from './http.js';
 import { PricingStore } from './ledger/pricing.js';
+import { UsageStore } from './ledger/usage.js';
 import { TaskEngine } from './tasks/engine.js';
 import { TabStore } from './tasks/store.js';
 
@@ -41,6 +42,7 @@ async function main(): Promise<void> {
   await fs.mkdir(p.home, { recursive: true });
   const settings = await SettingsStore.open(p.settings);
   const pricing = await PricingStore.open(p.pricing);
+  const usage = await UsageStore.open(p.usage);
   const store = new TabStore(p.projects);
   const health = healthCache();
   let permissionUrl: string | undefined;
@@ -53,6 +55,7 @@ async function main(): Promise<void> {
     pricing: () => pricing.get(),
     health: () => health.last() ?? {},
     permissionUrl: () => permissionUrl,
+    usage,
   });
   engine.on('engine-error', ({ tabId, error }: { tabId: string; error: unknown }) => {
     console.error(`[council] tab ${tabId}:`, error instanceof Error ? error.message : error);

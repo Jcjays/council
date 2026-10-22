@@ -29,7 +29,7 @@ export function route(
   unavailable: Provider[] = [],
 ): RouteDecision {
   const blocked = (p: Provider) => budgets[p]?.exhausted === true || unavailable.includes(p);
-  const why = (p: Provider) => (unavailable.includes(p) ? `${p} CLI is not available` : `${p} budget is exhausted`);
+  const why = (p: Provider) => (unavailable.includes(p) ? `${p} CLI is not available` : `${p} ${budgets[p]?.reason ?? 'budget is exhausted'}`);
 
   const target = map[tier];
   if (!blocked(target.provider)) return { tier, provider: target.provider, model: target.model };

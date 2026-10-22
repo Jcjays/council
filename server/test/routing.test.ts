@@ -44,3 +44,8 @@ test('keeps the original tier with a reason when every provider is out', () => {
   expect(r).toMatchObject({ tier: 'easy', provider: 'gemini', model: 'flash', reason: expect.stringContaining('exhausted') });
   expect(r.shiftedFrom).toBeUndefined();
 });
+
+test('the routing reason says why the provider is out', () => {
+  const windowOut: BudgetState = { ...out('gemini'), reason: 'has used up its 5-hour window' };
+  expect(route('easy', map, { ...budgets, gemini: windowOut }).reason).toBe('gemini has used up its 5-hour window; routed easy to medium');
+});

@@ -159,6 +159,8 @@ export function createServer(deps: ServerDeps): CouncilServer {
       }
     }
 
+    if (resource === 'usage' && id === 'refresh' && method === 'POST') return { status: 200, body: await engine.refreshUsage() };
+
     if (resource === 'budgets' && method === 'GET') return { status: 200, body: await engine.budgets() };
 
     if (resource === 'routing' && method === 'GET') {

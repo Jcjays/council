@@ -1,4 +1,4 @@
-import type { Adapter, AdapterEvent, Provider, QuotaWindow, ResultEvent, Tier } from '../adapters/types.js';
+import type { Adapter, AdapterEvent, Provider, ProviderPlan, QuotaWindow, ResultEvent, Tier } from '../adapters/types.js';
 import { costFor, type PriceTable } from '../ledger/pricing.js';
 import { buildVotePrompt } from './prompt.js';
 import { tally } from './tally.js';
@@ -37,6 +37,8 @@ export interface CouncilArgs {
   onResult: (provider: Provider, model: string | null, ev: ResultEvent) => Promise<void> | void;
   /** Called when a seat's CLI reports the account's usage windows. */
   onQuota?: (provider: Provider, windows: QuotaWindow[]) => void;
+  /** How the seat's CLI is paid for, when its stream says. */
+  onAccount?: (provider: Provider, plan: ProviderPlan) => void;
   pricing: PriceTable;
   timeoutMs?: number;
   costCeiling?: number;
@@ -90,6 +92,7 @@ async function runSeat(seat: Seat, a: CouncilArgs, prompt: string): Promise<Seat
     for await (const ev of untilAbort(events, ac.signal)) {
       if (ev.type === 'text') streamed += ev.text;
       else if (ev.type === 'quota') a.onQuota?.(seat.provider, ev.windows);
+      else if (ev.type === 'account') a.onAccount?.(seat.provider, ev.plan);
       else if (ev.type === 'error') error = ev.message;
       else if (ev.type === 'result') {
         costUsd = ev.costUsd ?? costFor(seat.provider, seat.model, ev.usage, a.pricing);

@@ -4,7 +4,8 @@ export const PROVIDERS: readonly Provider[] = ['claude', 'codex', 'gemini'];
 export type Tier = 'easy' | 'medium' | 'hard';
 export const TIER_ORDER: readonly Tier[] = ['easy', 'medium', 'hard'];
 
-export type Purpose = 'vote' | 'work' | 'summarize';
+/** `probe`: the cheapest possible run, made only to read the account's plan and usage windows. */
+export type Purpose = 'vote' | 'work' | 'summarize' | 'probe';
 
 export interface Usage {
   inputTokens: number;
@@ -23,6 +24,9 @@ export interface PermissionBridge {
 
 /** Hard cap passed to Claude for a council vote, in USD. */
 export const VOTE_MAX_BUDGET_USD = 0.05;
+
+/** Hard cap passed to Claude for a usage probe, in USD. */
+export const PROBE_MAX_BUDGET_USD = 0.01;
 
 export interface RunOptions {
   cwd: string;
@@ -49,8 +53,20 @@ export interface QuotaWindow {
   resetsAt?: string;
 }
 
+/** How a CLI is paid for: a subscription with usage windows, or a metered API key. */
+export type PlanKind = 'subscription' | 'api-key' | 'unknown';
+
+export interface ProviderPlan {
+  kind: PlanKind;
+  /** For people, e.g. "Claude subscription", "OpenAI API key". */
+  label: string;
+  /** True when the CLI said so itself (a run's init event, `codex login status`); false for a guess from files or the environment. */
+  confirmed: boolean;
+}
+
 export type AdapterEvent =
   | { type: 'session'; id: string }
+  | { type: 'account'; plan: ProviderPlan }
   | { type: 'quota'; windows: QuotaWindow[] }
   | { type: 'text'; text: string }
   | { type: 'tool'; id?: string; name: string; input: unknown }
@@ -67,6 +83,8 @@ export interface CliHealth {
   version?: string;
   authed: boolean;
   authSource?: AuthSource;
+  /** Best-effort, before any run; a run's `account` event confirms or corrects it. */
+  plan?: ProviderPlan;
   error?: string;
 }
 

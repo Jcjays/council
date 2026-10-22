@@ -130,3 +130,21 @@ test('hook, thinking and bare rate-limit events produce nothing', () => {
   expect(parseClaudeLine({ type: 'system', subtype: 'thinking_tokens' })).toEqual([]);
   expect(parseClaudeLine({ type: 'assistant', message: { content: [{ type: 'thinking', thinking: '' }] } })).toEqual([]);
 });
+
+test('the init event says how Claude Code is paid for: no API key means the subscription', () => {
+  const init = fixtureLines('claude-work.jsonl').find((o) => o.type === 'system' && o.subtype === 'init');
+  expect(init?.apiKeySource).toBe('none');
+  expect(parseClaudeLine(init as Record<string, unknown>)).toEqual([
+    { type: 'session', id: 'd679c65c-7956-4f6b-933b-9ae9a3fe31a8' },
+    { type: 'account', plan: { kind: 'subscription', label: 'Claude subscription', confirmed: true } },
+  ]);
+  const keyed = parseClaudeLine({ type: 'system', subtype: 'init', session_id: 's', apiKeySource: 'ANTHROPIC_API_KEY' });
+  expect(keyed[1]).toEqual({ type: 'account', plan: { kind: 'api-key', label: 'API key (ANTHROPIC_API_KEY)', confirmed: true } });
+});
+
+test('a usage probe is capped at a cent and runs tool-less', () => {
+  const s = buildClaudeArgs({ ...base, purpose: 'probe', model: 'claude-haiku-5-5' });
+  expect(flag(s.args, '--max-budget-usd')).toBe('0.01');
+  expect(flag(s.args, '--tools')).toBe('');
+  expect(s.args).toContain('--no-session-persistence');
+});

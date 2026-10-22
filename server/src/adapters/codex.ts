@@ -4,7 +4,7 @@ import path from 'node:path';
 import type { JsonObject } from './jsonl.js';
 import { runCli } from './run.js';
 import { resolveCommand } from './spawn.js';
-import { isoFromEpoch, num, windowName, ZERO_USAGE, type AdapterEvent, type CliSpec, type QuotaWindow, type RunOptions } from './types.js';
+import { isoFromEpoch, num, windowName, ZERO_USAGE, type AdapterEvent, type CliSpec, type ProviderPlan, type QuotaWindow, type RunOptions } from './types.js';
 
 /** Codex attaches `rate_limits` snapshots ({primary, secondary}) to some events. */
 function quotaFromRateLimits(o: JsonObject): AdapterEvent[] {
@@ -22,7 +22,16 @@ function quotaFromRateLimits(o: JsonObject): AdapterEvent[] {
       resetsAt: isoFromEpoch(w.resets_at),
     });
   }
-  return windows.length > 0 ? [{ type: 'quota', windows }] : [];
+  const out: AdapterEvent[] = windows.length > 0 ? [{ type: 'quota', windows }] : [];
+  const plan = (limits as JsonObject).plan_type;
+  if (typeof plan === 'string' && plan !== '') out.push({ type: 'account', plan: codexPlanFromType(plan) });
+  return out;
+}
+
+/** `plan_type` of a rate-limit snapshot: a ChatGPT plan name, or an API key. */
+function codexPlanFromType(plan: string): ProviderPlan {
+  if (/api|key/i.test(plan)) return { kind: 'api-key', label: 'OpenAI API key', confirmed: true };
+  return { kind: 'subscription', label: `ChatGPT ${plan.charAt(0).toUpperCase()}${plan.slice(1)}`, confirmed: true };
 }
 
 /**

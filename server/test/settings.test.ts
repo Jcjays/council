@@ -13,7 +13,7 @@ test('a missing settings file loads as the defaults', async () => {
 });
 
 test('the defaults match the spec', () => {
-  expect(DEFAULT_SETTINGS.budgets).toEqual({ claude: 40, codex: 30, gemini: 30 });
+  expect(DEFAULT_SETTINGS.spendCaps).toEqual({ claude: 0, codex: 0, gemini: 0 });
   expect(DEFAULT_SETTINGS.warnPct).toBe(0.8);
   expect(DEFAULT_SETTINGS.resetDay).toBe(1);
   expect(DEFAULT_SETTINGS.seats.map((s) => s.provider)).toEqual(['gemini', 'codex', 'claude']);
@@ -32,13 +32,22 @@ test('the defaults match the spec', () => {
 
 test('a partial file is merged over the defaults', async () => {
   const file = tmpFile();
-  fs.writeFileSync(file, JSON.stringify({ budgets: { claude: 10 }, autoStart: true, seats: [{ provider: 'gemini', model: 'flash' }] }));
+  fs.writeFileSync(file, JSON.stringify({ spendCaps: { claude: 10 }, autoStart: true, seats: [{ provider: 'gemini', model: 'flash' }] }));
   const s = await loadSettings(file);
-  expect(s.budgets).toEqual({ claude: 10, codex: 30, gemini: 30 });
+  expect(s.spendCaps).toEqual({ claude: 10, codex: 0, gemini: 0 });
   expect(s.autoStart).toBe(true);
   expect(s.seats).toEqual([{ provider: 'gemini', model: 'flash' }]);
   expect(s.tierMap).toEqual(DEFAULT_SETTINGS.tierMap);
   expect(s.permissionMode).toBe('ask');
+});
+
+test('monthly budgets from before plan detection are dropped rather than kept as hidden caps', async () => {
+  const file = tmpFile();
+  fs.writeFileSync(file, JSON.stringify({ budgets: { claude: 40, codex: 30, gemini: 30 }, allowedCommands: ['Bash(ls*)'] }));
+  const s = await loadSettings(file);
+  expect(s.spendCaps).toEqual({ claude: 0, codex: 0, gemini: 0 });
+  expect('budgets' in s).toBe(false);
+  expect('allowedCommands' in s).toBe(false);
 });
 
 test('save then load round-trips', async () => {
@@ -69,6 +78,6 @@ test('effectiveSettings applies a project override and leaves everything else', 
   const e = effectiveSettings(s, 'p1');
   expect(e.autoStart).toBe(true);
   expect(e.permissionMode).toBe('auto');
-  expect(e.budgets).toEqual(s.budgets);
+  expect(e.spendCaps).toEqual(s.spendCaps);
   expect(effectiveSettings(s, 'other')).toEqual(s);
 });

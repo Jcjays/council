@@ -2,10 +2,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { expect, test } from 'vitest';
-import type { Adapter, AdapterEvent, Provider, RunOptions } from '../src/adapters/types.js';
+import type { Adapter, AdapterEvent, Provider, ProviderPlan, RunOptions } from '../src/adapters/types.js';
 import { DEFAULT_SETTINGS, type Settings } from '../src/config/settings.js';
 import { DEFAULT_PRICING } from '../src/ledger/pricing.js';
 import { readEntries } from '../src/ledger/ledger.js';
+import { UsageStore } from '../src/ledger/usage.js';
 import { TaskEngine } from '../src/tasks/engine.js';
 import { TabStore } from '../src/tasks/store.js';
 import type { Tab } from '../src/tasks/types.js';
@@ -35,7 +36,9 @@ interface Setup {
   adapters: Record<Provider, FakeAdapter>;
 }
 
-function setup(opts: { settings?: Partial<Settings>; adapters?: Partial<Record<Provider, FakeAdapter>>; health?: Partial<Record<Provider, boolean>> } = {}): Setup {
+function setup(
+  opts: { settings?: Partial<Settings>; adapters?: Partial<Record<Provider, FakeAdapter>>; health?: Partial<Record<Provider, boolean>>; plans?: Partial<Record<Provider, ProviderPlan>>; usage?: UsageStore } = {},
+): Setup {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'council-engine-'));
   const ledgerFile = path.join(home, 'ledger.jsonl');
   const adapters: Record<Provider, FakeAdapter> = {
@@ -54,8 +57,9 @@ function setup(opts: { settings?: Partial<Settings>; adapters?: Partial<Record<P
     snapshot: async () => 'Top-level: src/',
     health: () =>
       Object.fromEntries(
-        (['claude', 'codex', 'gemini'] as Provider[]).map((p) => [p, { installed: opts.health?.[p] ?? true, authed: true }]),
+        (['claude', 'codex', 'gemini'] as Provider[]).map((p) => [p, { installed: opts.health?.[p] ?? true, authed: true, plan: opts.plans?.[p] }]),
       ),
+    usage: opts.usage,
   });
   engine.on('engine-error', () => {});
   return { engine, ledgerFile, adapters };
@@ -271,7 +275,7 @@ test('an unavailable provider drops out of the council and its tier is served by
 });
 
 test('an exhausted budget still shifts the tier even when every CLI is set up', async () => {
-  const { engine } = setup({ settings: { budgets: { claude: 40, codex: 30, gemini: 0.0001 } } });
+  const { engine } = setup({ settings: { spendCaps: { claude: 0, codex: 0, gemini: 0.0001 } } });
   const first = await engine.createTab('C:/proj', 'warm-up');
   await engine.submit(first.id, 'x', { kind: 'auto' });
   await waitFor(engine, first.id, ['awaiting-start']);
@@ -329,7 +333,7 @@ test('streaming many events emits few full-tab updates and clips oversized tool 
 });
 
 test('usage windows reported by a CLI are kept per provider and exposed with the budgets', async () => {
-  const windows = [{ name: '5-hour', usedPct: 0.59, resetsAt: '2026-10-21T04:30:00.000Z' }];
+  const windows = [{ name: '5-hour', usedPct: 0.59, resetsAt: new Date(Date.now() + 3_600_000).toISOString() }];
   const events: AdapterEvent[] = [{ type: 'session', id: 's' }, { type: 'quota', windows }, ...workEvents().slice(1)];
   const claude = new FakeAdapter('claude', (opts: RunOptions) => (opts.purpose === 'vote' ? { events: voteEvents('hard') } : { events }));
   const { engine } = setup({ settings: { autoStart: true }, adapters: { claude } });
@@ -366,8 +370,8 @@ test('with only Claude set up, the council is Haiku alone and escalation climbs 
   expect(calls.map((c) => c.model)).toEqual(['claude-haiku-5-5', 'claude-sonnet-5-5']);
 });
 
-test('budgets reflect the ledger against the configured limits', async () => {
-  const { engine } = setup({ settings: { autoStart: true, budgets: { claude: 40, codex: 30, gemini: 0.01 } } });
+test('budgets reflect the ledger against an optional monthly cap', async () => {
+  const { engine } = setup({ settings: { autoStart: true, spendCaps: { claude: 0, codex: 0, gemini: 0.01 } } });
   const tab = await engine.createTab('C:/proj', 't');
   await engine.submit(tab.id, 'x', { kind: 'auto' });
   await waitFor(engine, tab.id, ['idle']);
@@ -376,4 +380,69 @@ test('budgets reflect the ledger against the configured limits', async () => {
   expect(b.gemini.routingSpent).toBeCloseTo(0.001, 6);
   expect(b.gemini.exhausted).toBe(true);
   expect(b.claude.spent).toBeCloseTo(0.001, 6);
+});
+
+const SUBSCRIPTION: ProviderPlan = { kind: 'subscription', label: 'Claude subscription', confirmed: true };
+const inAnHour = () => new Date(Date.now() + 3_600_000).toISOString();
+
+test('the plan a run reports is what the budgets show, over the guess from health', async () => {
+  const events: AdapterEvent[] = [{ type: 'session', id: 's' }, { type: 'account', plan: SUBSCRIPTION }, ...workEvents().slice(1)];
+  const claude = new FakeAdapter('claude', () => ({ events }));
+  const { engine } = setup({ adapters: { claude }, plans: { claude: { kind: 'api-key', label: 'API key (ANTHROPIC_API_KEY)', confirmed: false }, codex: { kind: 'api-key', label: 'OpenAI API key', confirmed: true } } });
+  expect((await engine.budgets()).claude.plan?.kind).toBe('api-key');
+  const tab = await engine.createTab('C:/proj', 't');
+  await engine.submit(tab.id, 'x', { kind: 'manual', provider: 'claude', model: null });
+  await waitFor(engine, tab.id, ['idle']);
+  const b = await engine.budgets();
+  expect(b.claude.plan).toEqual(SUBSCRIPTION);
+  expect(b.codex.plan).toEqual({ kind: 'api-key', label: 'OpenAI API key', confirmed: true });
+});
+
+test('a subscription whose usage window is used up is routed around until it resets', async () => {
+  const usage = new UsageStore();
+  usage.notePlan('claude', SUBSCRIPTION);
+  usage.noteUsage('claude', { windows: [{ name: '5-hour', usedPct: 1, resetsAt: inAnHour() }], observedAt: new Date().toISOString() });
+  const adapters = { gemini: scripted('gemini', 'hard'), codex: scripted('codex', 'hard'), claude: scripted('claude', 'hard') };
+  const { engine } = setup({ usage, adapters });
+  const tab = await engine.createTab('C:/proj', 't');
+  await engine.submit(tab.id, 'big refactor', { kind: 'auto' });
+  const voted = await waitFor(engine, tab.id, ['awaiting-start']);
+  expect(voted.vote?.decision).toBe('hard');
+  expect(voted.tier).toBe('medium');
+  expect(voted.worker?.provider).toBe('codex');
+  expect(voted.routing?.reason).toBe('claude has used up its 5-hour window; routed hard to medium');
+});
+
+test('Refresh usage runs the cheapest probe on each set-up CLI that reports usage, and ledgers it', async () => {
+  const windows = [{ name: '5-hour', usedPct: 0.4, resetsAt: inAnHour() }];
+  const probeEvents: AdapterEvent[] = [
+    { type: 'account', plan: SUBSCRIPTION },
+    { type: 'quota', windows },
+    { type: 'result', usage: { inputTokens: 5, cachedInputTokens: 0, outputTokens: 1 }, costUsd: 0.0004, exitCode: 0, isError: false, text: 'ok' },
+  ];
+  const claude = new FakeAdapter('claude', () => ({ events: probeEvents }));
+  const { engine, ledgerFile, adapters } = setup({ adapters: { claude }, health: { codex: false } });
+  const r = await engine.refreshUsage();
+  expect(claude.calls).toEqual([expect.objectContaining({ purpose: 'probe', model: 'claude-haiku-5-5', fullAuto: false })]);
+  expect(adapters.codex.calls).toEqual([]);
+  expect(adapters.gemini.calls).toEqual([]);
+  expect(r.probed).toEqual(['claude']);
+  expect(r.skipped).toEqual([
+    { provider: 'codex', reason: 'not set up' },
+    { provider: 'gemini', reason: 'Gemini CLI does not report usage windows' },
+  ]);
+  expect(r.budgets.claude).toMatchObject({ plan: SUBSCRIPTION, usage: { windows } });
+  const entries = await readEntries(ledgerFile);
+  expect(entries).toEqual([expect.objectContaining({ provider: 'claude', purpose: 'probe', costUsd: 0.0004 })]);
+});
+
+test('plans and usage windows survive a restart', async () => {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'council-usage-')), 'usage.json');
+  const first = await UsageStore.open(file);
+  first.notePlan('claude', SUBSCRIPTION);
+  first.noteUsage('claude', { windows: [{ name: '7-day', usedPct: 0.5, resetsAt: inAnHour() }], observedAt: '2026-10-22T01:00:00.000Z' });
+  await first.flush();
+  const { engine } = setup({ usage: await UsageStore.open(file) });
+  const b = await engine.budgets();
+  expect(b.claude).toMatchObject({ plan: SUBSCRIPTION, pct: 0.5, usage: { observedAt: '2026-10-22T01:00:00.000Z' } });
 });

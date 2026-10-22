@@ -10,8 +10,8 @@ export type PermissionMode = 'ask' | 'auto';
 export type ProjectOverride = Partial<Pick<Settings, 'permissionMode' | 'autoStart' | 'autoEscalate'>>;
 
 export interface Settings {
-  /** Monthly USD credit per provider; 0 disables tracking for that provider. */
-  budgets: Record<Provider, number>;
+  /** Optional monthly spend cap in USD for an API-key account; 0 = none. Subscriptions are judged by their usage windows instead. */
+  spendCaps: Record<Provider, number>;
   warnPct: number;
   resetDay: number;
   seats: Seat[];
@@ -30,7 +30,7 @@ export interface Settings {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
-  budgets: { claude: 40, codex: 30, gemini: 30 },
+  spendCaps: { claude: 0, codex: 0, gemini: 0 },
   warnPct: 0.8,
   resetDay: 1,
   seats: [

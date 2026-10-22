@@ -72,10 +72,10 @@ test('GET /api/health returns one entry per provider', async () => {
 test('GET /api/settings returns the settings and PUT merges and persists a change', async () => {
   const before = await api('GET', '/api/settings');
   expect(before.json.autoStart).toBe(false);
-  const put = await api('PUT', '/api/settings', { autoStart: true, budgets: { gemini: 5 } });
+  const put = await api('PUT', '/api/settings', { autoStart: true, spendCaps: { gemini: 5 } });
   expect(put.status).toBe(200);
   expect(put.json.autoStart).toBe(true);
-  expect(put.json.budgets).toEqual({ claude: 40, codex: 30, gemini: 5 });
+  expect(put.json.spendCaps).toEqual({ claude: 0, codex: 0, gemini: 5 });
   const after = await api('GET', '/api/settings');
   expect(after.json.autoStart).toBe(true);
   expect(JSON.parse(fs.readFileSync(path.join(fixture.home, 'settings.json'), 'utf8')).autoStart).toBe(true);
@@ -122,7 +122,8 @@ test('GET /api/routing describes the effective council and tier map', async () =
 test('GET /api/budgets returns the three providers', async () => {
   const r = await api('GET', '/api/budgets');
   expect(r.status).toBe(200);
-  expect(r.json.gemini).toMatchObject({ limit: 30, spent: 0 });
+  expect(r.json.gemini).toMatchObject({ spent: 0, exhausted: false });
+  expect(r.json.claude).toMatchObject({ limit: 0, spent: 0 });
 });
 
 test('tabs: create, list, get, submit; the websocket streams the tab updates', async () => {
@@ -303,4 +304,13 @@ describe('permission prompts over HTTP', () => {
     expect(r.json.fullAuto).toBe(true);
     expect((await call(`/api/tabs/${id}/permissions`, { mode: 'sometimes' })).status).toBe(400);
   });
+});
+
+test('POST /api/usage/refresh probes the set-up CLIs and returns the budgets', async () => {
+  const r = await api('POST', '/api/usage/refresh');
+  expect(r.status).toBe(200);
+  expect(r.json.probed).toEqual(expect.any(Array));
+  expect(r.json.skipped).toEqual(expect.any(Array));
+  expect(Object.keys(r.json.budgets).sort()).toEqual(['claude', 'codex', 'gemini']);
+  expect(fixture.adapters.claude.calls.some((c) => c.purpose === 'probe')).toBe(true);
 });
