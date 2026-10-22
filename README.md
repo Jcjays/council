@@ -2,16 +2,16 @@
 
 Council is a small local app that puts **Claude Code**, **Codex CLI** and **Gemini CLI** to work on the same project at the same time, and spends the expensive one only when it has to.
 
-You open a project, create a tab and describe a task. A *council* of cheap models votes on how hard the task is. The task goes to the cheapest worker that can handle it: Gemini for easy, Codex for medium, Claude for hard (all configurable). The worker edits your checkout directly, follows the project's own `CLAUDE.md`, `AGENTS.md` or `GEMINI.md`, and commits nothing; you review the result in your editor or git. Spend per provider is tallied against your monthly credit and shown on screen.
+You open a project, create a tab and describe a task. A *council* of cheap models votes on how hard the task is. The task goes to the cheapest worker that can handle it: Gemini for easy, Codex for medium, Claude for hard (all configurable). The worker edits your checkout directly, follows the project's own `CLAUDE.md`, `AGENTS.md` or `GEMINI.md`, and commits nothing; you review the result in your editor or git. Council works out by itself how each CLI is paid for (a subscription or an API key), shows the usage windows a subscription reports and what each provider has cost this month, and keeps model prices up to date from public price lists.
 
 Everything runs on your machine and talks to the CLIs you already have installed and signed in. Nothing leaves your machine except what those CLIs send to their vendors.
 
 ## How a tab works
 
-1. **Describe** the task in a new tab. Pick *Auto* to let the council route it, or pick a specific provider and model yourself.
+1. **Describe** the task in a new tab. Pick *Auto* to let the council route it, or pick a model yourself from the model picker (each provider's models, cheapest first, with their prices). Choose *Ask me* or *Auto* for permissions (see below).
 2. **Vote.** Each council seat (by default Gemini Flash, a small Codex model and Claude Haiku) is asked, without tools, to classify the task as easy, medium or hard. Majority wins; a three-way split lands on medium; a two-way tie goes to the higher tier. The vote card shows every seat's answer, confidence, reason and cost.
-3. **Start.** The task is routed to the worker for that tier. If that provider's budget is exhausted, or its CLI is missing or not signed in, routing shifts to the nearest tier and says so. You can override the pick before starting, or turn on *auto-start* in Settings.
-4. **Work.** The worker runs in your project checkout. Its output, tool calls and cost stream into the tab. Follow-up messages resume the same CLI session. Nothing is committed; the changes sit in your working copy like edits you made yourself. Two tabs editing the same files at the same time can collide, so give parallel tabs separate areas of the code.
+3. **Start.** The task is routed to the worker for that tier. If that provider's subscription has used up a usage window (or, for an API key, an optional monthly cap is reached), or its CLI is missing or not signed in, routing shifts to the nearest tier and says so. You can override the pick before starting, or turn on *auto-start* in Settings.
+4. **Work.** The worker runs in your project checkout. Its output, tool calls and cost stream into the tab. In *Ask me* mode a Claude worker stops before running a command and the tab shows an approval card (see Permissions). Follow-up messages resume the same CLI session. Nothing is committed; the changes sit in your working copy like edits you made yourself. Two tabs editing the same files at the same time can collide, so give parallel tabs separate areas of the code.
 5. **Escalate or switch.** If the worker fails, the task is handed one tier up with a short summary of what was tried and the uncommitted diff so far (once, automatically; after that it is your call). *Switch worker* does the same to any provider you choose; switching back resumes the earlier session.
 6. **Review and close.** Look at the changes in your editor or `git diff`, keep or discard them, and close the tab. Closing stops a running worker and leaves the checkout as it is.
 
@@ -24,7 +24,7 @@ Everything runs on your machine and talks to the CLIs you already have installed
   - Codex CLI: `npm install -g @openai/codex`, then set `CODEX_API_KEY` (or `OPENAI_API_KEY`) or run `codex login`.
   - Gemini CLI: `npm install -g @google/gemini-cli`, then set `GEMINI_API_KEY` or run `gemini` once and sign in. Google Workspace accounts also need `GOOGLE_CLOUD_PROJECT`.
 
-The Settings page has a health panel that shows what Council can see of each CLI.
+Settings › Advanced has a CLI health panel that shows what Council can see of each CLI.
 
 ## Install and run
 
@@ -36,31 +36,49 @@ npm start
 
 Then open <http://localhost:4317>. Set `PORT` to use another port. During development `npm run dev` runs the server with reload and the client with Vite on <http://localhost:5173>.
 
-Council keeps its data in `~/.council` (`settings.json`, `pricing.json`, `ledger.jsonl`, and one folder per project with its tabs). Set `COUNCIL_HOME` to put it elsewhere.
+Council keeps its data in `~/.council` (`settings.json` with only what you changed, `pricing.json` with the fetched prices and any overrides, `usage.json` with each provider's detected plan and last usage windows, `ledger.jsonl`, and one folder per project with its tabs). Set `COUNCIL_HOME` to put it elsewhere.
 
 ## One, two or three CLIs
 
-Council works with whatever is installed and signed in. With all three, the council and tier map are what Settings says. With one provider, its cheapest model votes alone and the tiers climb that provider's own model ladder (for Claude: easy → Haiku, medium → Sonnet, hard → Opus; the ladder is the model list in Settings, cheapest first). With two, a tier whose provider is missing is filled from the nearest configured provider, and a tier that would reuse the rung below it moves one rung up. The vote card says what substitution was made, and the pickers only offer providers that are set up. With none, the app shows the setup panel instead of a composer.
+Council works with whatever is installed and signed in. With all three, the council and tier map are what Settings says. With one provider, its cheapest model votes alone and the tiers climb that provider's own model ladder (for Claude: easy → Haiku, medium → Sonnet, hard → Opus; the ladders are curated in `server/src/config/models.ts`, cheapest first). With two, a tier whose provider is missing is filled from the nearest configured provider, and a tier that would reuse the rung below it moves one rung up. The vote card says what substitution was made, and the pickers only offer providers that are set up. With none, the app shows the setup panel instead of a composer.
 
-## Budgets and prices
+## Plans, usage and prices
 
-Each provider has a monthly limit (defaults: Claude $40, Codex $30, Gemini $30, reset on the 1st). Every CLI run, including votes and hand-off summaries, is appended to `ledger.jsonl` and summed for the current period. At 80% a budget bar turns amber; at 100% the provider counts as exhausted and auto routing avoids it. Picking it by hand still works.
+Nothing here needs entering. Council detects, per provider:
 
-Plan usage is detected automatically where the CLI reports it: Claude Code streams the account's five-hour and seven-day windows during every run, and Codex attaches rate-limit snapshots to its events. Those windows appear under the provider's budget bar with the time to reset, straight from the CLI, no setup needed. Plain API keys expose no remaining-credit figure, so the dollar limits above stay a one-time entry; the spend against them is always tracked automatically.
+- **How it is paid for.** Claude: the `apiKeySource` of each run's init event (`none` means the signed-in subscription), and before any run, `ANTHROPIC_API_KEY` in the environment or a sign-in. Codex: `codex login status` (ChatGPT plan or API key) and the plan named in its rate-limit snapshots. Gemini: `GEMINI_API_KEY` / `GOOGLE_API_KEY` or Vertex settings mean pay per use; a Google sign-in means the account's Gemini Code Assist quota.
+- **Usage windows.** Claude Code reports the five-hour and seven-day windows in every run; Codex attaches rate-limit snapshots. They show in the sidebar and in Settings › Plan & usage with the time to reset. A subscription turns amber at 80% of its fullest window and, at 100%, auto routing goes around it until the window resets. Gemini CLI reports no quota, so only its spend shows.
+- **Spend this month.** Every CLI run, votes and hand-off summaries included, is appended to `ledger.jsonl`. Claude Code reports its own cost; on a subscription that is the list-price equivalent, not money leaving your account. Codex and Gemini report tokens, which Council prices.
 
-Claude Code reports its own cost per run and that number is used as is. If you run Claude on a subscription rather than an API key, it is the list-price equivalent, not money leaving your account. Codex and Gemini report tokens only, so Council multiplies them by the price table in Settings. The seeded prices come from public price pages and are meant to be checked and edited; prices are per million tokens and a row can be an exact model name, a prefix, or `<provider>:default`.
+*Refresh usage* in Settings sends one tiny request to Claude and to Codex (each capped, a fraction of a cent, ledgered as `probe`) to read fresh windows without waiting for the next task.
+
+**Prices** come from two public, keyless lists: LiteLLM's `model_prices_and_context_window.json` first, OpenRouter's model list for anything LiteLLM lacks. They are fetched at startup when the cached copy is older than seven days, and on *Refresh prices* in Settings; offline, the prices seeded in the code (October 2026) apply. Council's short names (`flash`, `pro`, `flash-lite`, provider defaults) follow the real model they stand for. A wrong or missing price can be overridden under Settings › Advanced.
+
+An API key has no remaining-credit figure to read, so for those Settings › Advanced has an optional **monthly spend cap** per provider; when reached, auto routing goes around that provider. It does not apply to a subscription.
+
+## Permissions: Ask me or Auto
+
+Each tab runs in one of two modes, chosen in the composer; new tabs start in the mode set in Settings (default *Ask me*).
+
+- **Ask me.** Claude workers edit files freely and ask before anything else: Council passes Claude Code a small MCP permission tool (`server/src/mcp/permission-tool.ts`, via `--permission-prompt-tool`), which forwards each request to the tab. The tab moves to *Needs you* and shows an approval card: *Allow once*, *Allow for this tab* (remembers the command's program and subcommand, such as `npm test …`, or the tool), or *Deny*, which tells Claude why. Codex and Gemini cannot ask when headless: Codex edits and runs commands inside its workspace-write sandbox, Gemini applies edits and skips anything else that needs approval.
+- **Auto.** No prompts and no sandbox: Claude `--dangerously-skip-permissions`, Codex without its sandbox, Gemini `--approval-mode yolo`. Switching a tab to Auto also answers a waiting request.
 
 ## Settings worth knowing
 
-- **Council seats** – any number of seats from 1 to 5, each any provider and model. Keep them cheap: every task pays for every seat.
-- **Who does what** – the worker for each tier. Defaults: easy → Gemini `flash`, medium → Codex default model, hard → Claude Sonnet.
-- **Allowed commands** – Claude Code `--allowedTools` patterns for workers. Gemini workers auto-approve edits only; Codex workers run in a workspace-write sandbox. The *Full auto* toggle on a tab lifts all of these for that tab.
-- **Auto-start / auto-escalate / stall minutes** – whether to skip the pause after a vote, whether a failed worker escalates once by itself, and how long silence counts as a stall.
+The page keeps to what is yours to decide; everything else is detected or sits under *Advanced*.
+
+- **Who does what** – the worker for each tier, picked from the model picker. Defaults: easy → Gemini `flash`, medium → Codex default model, hard → Claude Sonnet.
+- **Council seats** – one to nine cheap models that rate each task. Every task pays for every seat.
+- **Permissions for new tabs** – *Ask me* or *Auto*, as above.
+- **Auto-start / auto-escalate** – whether to skip the pause after a vote, and whether a failed worker escalates once by itself.
+- **Plan & usage** and the **prices** line – what was detected, with *Refresh usage* and *Refresh prices*.
+- **Advanced** – spend caps for API-key accounts, the warning threshold and month start, seat timeout, per-vote ceiling, stall minutes, price overrides, CLI health.
 
 ## Known limits
 
 - Council seats are tool-less only on Claude. Codex and Gemini seats are *asked* not to read files and are cut off after 60 seconds, but a chatty seat can still spend more than the per-vote ceiling; the vote card flags it.
-- Sign-in detection is a heuristic (API key in the environment, or a stored login file). A provider can look signed in and still fail; the failure shows in the transcript and escalation takes over.
+- Sign-in detection is a heuristic (API key in the environment, a stored login file, `codex login status`). A provider can look signed in and still fail, for example a Google Workspace account without `GOOGLE_CLOUD_PROJECT`; the failure shows in the transcript and escalation takes over.
+- Plan detection is exact for Claude once a run has happened (before that it is a guess from the sign-in). For Codex it relies on `codex login status` wording and on the rate-limit snapshot naming the plan; for Gemini it reads the environment and the auth type in `~/.gemini/settings.json`, and a Google sign-in may be a free or a paid Code Assist tier, which the CLI does not say.
 - Gemini CLI resumes sessions per directory, so two Gemini tabs on the same project share a session list; very old Gemini CLIs may not accept the prompt on stdin.
 - The Codex and Gemini stream parsers were written from the documented event shapes; if a CLI release changes them, the transcript goes quiet while the cost is still recorded. Fixtures live in `server/test/fixtures`.
 - One developer, one machine. There is no team server.
