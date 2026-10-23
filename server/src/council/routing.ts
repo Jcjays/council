@@ -1,7 +1,16 @@
-import type { Provider } from '../adapters/types.js';
+import type { Provider, Tier } from '../adapters/types.js';
 import type { BudgetState } from '../ledger/budget.js';
 import { lookupPrice, type PriceTable } from '../ledger/pricing.js';
 import type { Seat, SeatResult } from './council.js';
+import { consensusComplexity } from './tally.js';
+
+// Transitional type exports for downstream modules until Tasks 3 & 4 refactor them
+export type Worker = Seat;
+export type TierMap = Record<Tier, Worker>;
+export function route(tier: any, map: any, budgets: any, unavailable: any = []): any {
+  const target = map?.[tier] ?? { provider: 'gemini', model: null };
+  return { tier, provider: target.provider, model: target.model };
+}
 
 const PROVIDER_ORDER: Record<Provider, number> = { gemini: 1, codex: 2, claude: 3 };
 
@@ -41,15 +50,21 @@ export function selectSeat(
   budgets: Partial<Record<Provider, BudgetState>> = {},
   unavailable: Provider[] = [],
 ): RoutingDecision {
+  if (seats.length === 0) {
+    return {
+      selectedSeat: { provider: 'gemini', model: null },
+      confidence: 0.5,
+      complexity: 3,
+      reason: 'No council seats configured',
+      isFallback: true,
+    };
+  }
+
   const isBlocked = (p: Provider) => budgets[p]?.exhausted === true || unavailable.includes(p);
   const why = (p: Provider) => (unavailable.includes(p) ? `${p} CLI is not available` : `${p} budget is exhausted`);
 
   const validVotes = seats.flatMap((s) => (s.vote ? [s.vote] : []));
-  const avgComplexity =
-    validVotes.length > 0
-      ? Math.round(validVotes.reduce((sum, v) => sum + v.complexity, 0) / validVotes.length)
-      : 3;
-  const complexity = Math.min(5, Math.max(1, avgComplexity));
+  const complexity = consensusComplexity(validVotes);
 
   const ranked = rankSeats(
     seats.map((s) => s.seat),
@@ -75,7 +90,7 @@ export function selectSeat(
       selectedSeat: winner,
       confidence: res?.vote?.confidence ?? 0.8,
       complexity,
-      reason: res?.vote?.reason ?? 'Selected lowest-cost confident model',
+      reason: res?.vote?.reason || 'Selected lowest-cost confident model',
       isFallback: false,
     };
   }
@@ -87,7 +102,7 @@ export function selectSeat(
       selectedSeat: strongest,
       confidence: res?.vote?.confidence ?? 0.5,
       complexity,
-      reason: res?.vote?.reason || 'No seat reached 80% confidence; routed to strongest available model',
+      reason: 'No seat reached 80% confidence; routed to strongest available model',
       isFallback: true,
     };
   }

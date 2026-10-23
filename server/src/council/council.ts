@@ -28,6 +28,8 @@ export interface CouncilResult {
   reason: string;
   isFallback: boolean;
   exhaustedNotice?: string;
+  /** Transitional property until Task 4 updates engine */
+  decision?: any;
 }
 
 export interface CouncilArgs {
@@ -141,5 +143,6 @@ export async function runCouncil(a: CouncilArgs): Promise<CouncilResult> {
     reason: decision.reason,
     isFallback: decision.isFallback,
     exhaustedNotice: decision.exhaustedNotice,
+    decision: 'medium',
   };
 }

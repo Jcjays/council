@@ -55,6 +55,17 @@ test('seats run tool-less votes with the vote prompt and the JSON schema', async
   expect(g.calls[0]?.prompt).toContain('Top-level: src/');
 });
 
+test('seats report quota windows', async () => {
+  let quotaReported = false;
+  await run(
+    new FakeAdapter('gemini', { events: [...voteEvents(0.9, 1), { type: 'quota', windows: [{ name: 'day', fraction: 0.5 }] }] }),
+    new FakeAdapter('codex', { events: voteEvents(0.9, 1) }),
+    new FakeAdapter('claude', { events: voteEvents(0.9, 1) }),
+    { onQuota: () => { quotaReported = true; } },
+  ).promise;
+  expect(quotaReported).toBe(true);
+});
+
 test('a seat that throws is recorded as an error and ignored by selection', async () => {
   const { promise } = run(
     new FakeAdapter('gemini', { events: voteEvents(0.9, 2) }),
@@ -115,4 +126,19 @@ test('a seat whose output has no JSON counts as no vote, with its text kept for 
   const { promise } = run(new FakeAdapter('gemini', { events: voteEvents(0.8, 2) }), new FakeAdapter('codex', { events: voteEvents(0.8, 2) }), chatty);
   const r = await promise;
   expect(r.seats[2]).toMatchObject({ vote: null, error: expect.stringContaining('no vote'), text: 'I think this is medium.' });
+});
+
+test('empty council seats handled safely without throwing', async () => {
+  const promise = runCouncil({
+    seats: [],
+    adapters: registry(new FakeAdapter('claude'), new FakeAdapter('codex'), new FakeAdapter('gemini')),
+    task: 'x',
+    cwd: 'C:/w',
+    snapshot: '',
+    onResult: async () => {},
+    pricing: DEFAULT_PRICING,
+  });
+  const r = await promise;
+  expect(r.seats).toHaveLength(0);
+  expect(r.isFallback).toBe(true);
 });
