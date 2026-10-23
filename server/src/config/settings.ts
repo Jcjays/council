@@ -29,7 +29,7 @@ export const DEFAULT_SETTINGS: Settings = {
   warnPct: 0.8,
   resetDay: 1,
   seats: [
-    { provider: 'gemini', model: 'flash' },
+    { provider: 'gemini', model: 'flash-lite' },
     { provider: 'codex', model: 'gpt-5.1-codex-mini' },
     { provider: 'claude', model: 'claude-haiku-5-5' },
   ],

@@ -7,7 +7,7 @@ import { DEFAULT_PRICING } from '../src/ledger/pricing.js';
 
 const seats: Seat[] = [
   { provider: 'claude', model: 'claude-sonnet-5-5' },
-  { provider: 'gemini', model: 'flash' },
+  { provider: 'gemini', model: 'flash-lite' },
   { provider: 'codex', model: 'gpt-5.1-codex-mini' },
 ];
 
@@ -41,24 +41,24 @@ function makeResult(seat: Seat, confidence: number, complexity = 2, reason = 'te
 
 test('rankSeats sorts seats from lowest cost to highest capability', () => {
   const ranked = rankSeats(seats, DEFAULT_PRICING);
-  expect(ranked.map((s) => s.provider)).toEqual(['codex', 'gemini', 'claude']);
+  expect(ranked.map((s) => s.provider)).toEqual(['gemini', 'codex', 'claude']);
 });
 
 test('selectSeat picks the lowest-cost confident seat (confidence >= 0.8)', () => {
   const results: SeatResult[] = [
-    makeResult({ provider: 'gemini', model: 'flash' }, 0.9, 2, 'gemini ready'),
+    makeResult({ provider: 'gemini', model: 'flash-lite' }, 0.9, 2, 'gemini ready'),
     makeResult({ provider: 'codex', model: 'gpt-5.1-codex-mini' }, 0.85, 2, 'codex ready'),
     makeResult({ provider: 'claude', model: 'claude-sonnet-5-5' }, 0.95, 2, 'claude ready'),
   ];
   const decision = selectSeat(results, DEFAULT_PRICING, budgets);
-  expect(decision.selectedSeat.provider).toBe('codex');
+  expect(decision.selectedSeat.provider).toBe('gemini');
   expect(decision.isFallback).toBe(false);
-  expect(decision.confidence).toBe(0.85);
+  expect(decision.confidence).toBe(0.9);
 });
 
 test('selectSeat falls back to strongest reasoning seat when no seat reaches 80% confidence', () => {
   const results: SeatResult[] = [
-    makeResult({ provider: 'gemini', model: 'flash' }, 0.5, 4, 'not sure'),
+    makeResult({ provider: 'gemini', model: 'flash-lite' }, 0.5, 4, 'not sure'),
     makeResult({ provider: 'codex', model: 'gpt-5.1-codex-mini' }, 0.6, 4, 'might struggle'),
     makeResult({ provider: 'claude', model: 'claude-sonnet-5-5' }, 0.75, 4, 'complex architecture'),
   ];
@@ -69,12 +69,12 @@ test('selectSeat falls back to strongest reasoning seat when no seat reaches 80%
 
 test('selectSeat shifts away from exhausted provider even if confident', () => {
   const results: SeatResult[] = [
-    makeResult({ provider: 'gemini', model: 'flash' }, 0.9, 2, 'gemini ok'),
+    makeResult({ provider: 'gemini', model: 'flash-lite' }, 0.9, 2, 'gemini ok'),
     makeResult({ provider: 'codex', model: 'gpt-5.1-codex-mini' }, 0.9, 2, 'codex ok'),
     makeResult({ provider: 'claude', model: 'claude-sonnet-5-5' }, 0.95, 2, 'claude ok'),
   ];
-  const decision = selectSeat(results, DEFAULT_PRICING, { ...budgets, codex: out('codex') });
-  expect(decision.selectedSeat.provider).toBe('gemini');
+  const decision = selectSeat(results, DEFAULT_PRICING, { ...budgets, gemini: out('gemini') });
+  expect(decision.selectedSeat.provider).toBe('codex');
   expect(decision.isFallback).toBe(false);
 });
 

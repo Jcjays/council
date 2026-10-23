@@ -18,7 +18,7 @@ test('only Claude: configured Claude seat is kept and note explains', () => {
 test('Gemini and Claude: available seats kept, notes missing Codex', () => {
   const r = effectiveRouting(DEFAULT_SETTINGS, ['gemini', 'claude']);
   expect(r.seats).toEqual([
-    { provider: 'gemini', model: 'flash' },
+    { provider: 'gemini', model: 'flash-lite' },
     { provider: 'claude', model: 'claude-haiku-5-5' },
   ]);
   expect(r.notes.join(' ')).toMatch(/codex/i);
