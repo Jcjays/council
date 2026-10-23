@@ -12,12 +12,9 @@ interface Props {
   onStart: (pick?: { provider: Provider; model: string | null }) => Promise<void>;
 }
 
-/** "2–1" from the vote counts, largest first. */
+/** Short summary phrase of vote confidence. */
 export function tally(vote: CouncilResult): string {
-  return Object.values(vote.counts)
-    .filter((n) => n > 0)
-    .sort((a, b) => b - a)
-    .join('–');
+  return `${Math.round(vote.confidence * 100)}% conf`;
 }
 
 /** The council's vote: active deliberation preview while voting, and detailed breakdown when complete. */
@@ -42,28 +39,26 @@ export function VoteCard({ tab, settings, available, onStart }: Props) {
       <section className="card vote-card voting-active" aria-label="Council actively deliberating">
         <div className="vote-summary" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <span className="sdot pulse" style={{ '--c': 'var(--accent)' } as React.CSSProperties} />
-          <b>Council is deliberating on task…</b>
-          <span className="muted sm">Classifying task complexity</span>
+          <b>Council is analyzing task…</b>
+          <span className="muted sm">Evaluating model confidence &amp; complexity</span>
         </div>
         <p className="muted small" style={{ margin: '6px 0 10px' }}>
-          Council seats evaluate task scope and codebase impact to assign difficulty (easy: 1 file, medium: few files, hard: architecture/deep debugging). Confidence measures how certain the voter is based on prompt clarity.
+          Council seats evaluate repository snapshot and task scope, self-scoring confidence (0–100%) and estimated complexity (1–5). The lowest-cost confident seat executes.
         </p>
-        <div className="seats">
+        <div className="seats" style={{ opacity: 0.85 }}>
           {settings.seats.map((seat, i) => (
-            <div key={i} className="seat" style={{ opacity: 0.9 }}>
+            <div key={i} className="seat" style={{ background: 'var(--surface-2)', border: '1px dashed var(--border)' }}>
               <div className="who">
                 <Glyph provider={seat.provider} />
                 <span>{PROVIDER_NAMES[seat.provider]}</span>
-                <span className="model" title={seat.model ?? 'default model'}>
-                  {seat.model ?? 'default'}
-                </span>
+                <span className="model">{seat.model ?? 'default'}</span>
                 <span className="grow" />
                 <span className="muted xs" style={{ fontStyle: 'italic' }}>
-                  evaluating complexity…
+                  analyzing fit…
                 </span>
               </div>
               <div className="reason muted xs" style={{ marginTop: '4px' }}>
-                Assessing files affected, architecture, and required tools.
+                Assessing codebase context and self-reported capability.
               </div>
             </div>
           ))}
@@ -84,17 +79,25 @@ export function VoteCard({ tab, settings, available, onStart }: Props) {
   return (
     <section className="card vote-card" aria-label="Council vote">
       <button className="vote-summary" onClick={() => setManual(!open)} aria-expanded={open}>
-        <b>{single ? 'Council of one voted' : 'Council voted'}</b>
-        <span className={`tier tier-${vote.decision}`} title={`Consensus: ${vote.decision} difficulty`}>{vote.decision}</span>
-        {!single && <span>{tally(vote)}</span>}
-        {vote.tie && <span className="muted">tie broken</span>}
+        <b>{single ? 'Council of one evaluated' : 'Council evaluated'}</b>
+        <span className="chip" style={{ '--c': 'var(--accent)' } as React.CSSProperties}>
+          {Math.round(vote.confidence * 100)}% confident
+        </span>
+        <span className="chip">
+          Complexity {vote.complexity}/5
+        </span>
+        {vote.isFallback && <span className="muted xs">deep reasoning fallback</span>}
         {!open && (
           <>
             <span className="muted">·</span>
             {vote.seats.map((s, i) => (
-              <span key={i} className="row gap-sm" title={s.vote ? `${s.vote.tier} (${Math.round(s.vote.confidence * 100)}% rating certainty): ${s.vote.reason}` : (s.error ?? 'no vote')}>
+              <span
+                key={i}
+                className="row gap-sm"
+                title={s.vote ? `Confidence ${Math.round(s.vote.confidence * 100)}%, Complexity ${s.vote.complexity}/5: ${s.vote.reason}` : (s.error ?? 'no vote')}
+              >
                 <Glyph provider={s.seat.provider} />
-                {s.vote ? `${s.vote.tier} (${Math.round(s.vote.confidence * 100)}% certainty)` : 'no vote'}
+                {s.vote ? `${Math.round(s.vote.confidence * 100)}%` : 'no vote'}
               </span>
             ))}
           </>
@@ -106,7 +109,7 @@ export function VoteCard({ tab, settings, available, onStart }: Props) {
 
       {open && (
         <>
-          {/* Process & Consensus preview */}
+          {/* Process & Selection preview */}
           <div
             className="consensus-preview"
             style={{
@@ -119,38 +122,20 @@ export function VoteCard({ tab, settings, available, onStart }: Props) {
             }}
           >
             <div style={{ marginBottom: '6px' }}>
-              <strong>Consensus process: </strong>
+              <strong>Selection decision: </strong>
               <span>
-                {Object.entries(vote.counts)
-                  .filter(([_, count]) => count > 0)
-                  .map(([tierName, count]) => `${count} voted ${tierName}`)
-                  .join(', ')}
-                {vote.tie ? ' (tie broken to higher tier)' : ''}
-                {' → '}
-                Decision: <strong className={`tier tier-${vote.decision}`} style={{ fontSize: '10px' }}>{vote.decision} complexity</strong>
-                {' → '}
-                Assigned to <strong>{tab.worker ? PROVIDER_NAMES[tab.worker.provider] : 'worker'}</strong>
-                {tab.worker?.model ? <code style={{ marginLeft: '4px', fontSize: '11px' }}>({tab.worker.model})</code> : null}
-                {' '}
+                Assigned to <strong>{PROVIDER_NAMES[vote.selectedSeat.provider]}</strong>
+                {vote.selectedSeat.model ? <code style={{ marginLeft: '4px', fontSize: '11px' }}>({vote.selectedSeat.model})</code> : null}
+                {' — '}
                 <span className="muted xs">
-                  ({vote.decision === 'hard'
-                    ? 'top-tier reasoning agent'
-                    : vote.decision === 'medium'
-                    ? 'balanced agent'
-                    : 'lightweight fast agent'})
+                  {vote.isFallback
+                    ? 'No seat reached 80% confidence; routed to highest-strength reasoning model'
+                    : `Confident (${Math.round(vote.confidence * 100)}% ≥ 80%) & lowest cost`}
                 </span>
               </span>
             </div>
             <div className="muted xs" style={{ borderTop: '1px solid var(--border)', paddingTop: '6px', marginTop: '4px', lineHeight: 1.5 }}>
-              💡 <strong>What tiers mean:</strong>
-              <br />
-              • <strong>Easy</strong>: questions, explanations, research, reading docs/URLs, 1 file, copy/config tweaks, simple tests → fast lightweight agent
-              <br />
-              • <strong>Medium</strong>: few files, module refactoring, endpoint additions, bug with known cause → balanced agent
-              <br />
-              • <strong>Hard</strong>: major architecture overhaul, cross-cutting multi-file changes, deep root-cause debugging, concurrency/security → top reasoning agent
-              <br />
-              • <strong>Rating Certainty</strong>: How certain the voter is about this rating (high = clear prompt, low = ambiguous requirements).
+              💡 <strong>How Council routes:</strong> Seats inspect the task and self-score confidence. If any seat is confident (≥80%), the lowest-cost model is picked. If no model is confident, Council routes to the deepest reasoning model available.
             </div>
           </div>
 
@@ -165,20 +150,17 @@ export function VoteCard({ tab, settings, available, onStart }: Props) {
                   </span>
                   <span className="grow" />
                   {s.vote ? (
-                    <span
-                      className={`tier tier-${s.vote.tier}`}
-                      title={`Assessed task difficulty: ${s.vote.tier}`}
-                    >
-                      {s.vote.tier}
+                    <span className="chip" title={`Estimated complexity: ${s.vote.complexity}/5`}>
+                      Complexity {s.vote.complexity}/5
                     </span>
                   ) : (
-                    <span className="tier tier-none">no vote</span>
+                    <span className="chip muted">no vote</span>
                   )}
                 </div>
                 {s.vote && (
                   <div
                     className="conf"
-                    title={`Rating certainty: ${Math.round(s.vote.confidence * 100)}% (how confident the model is in this difficulty rating)`}
+                    title={`Confidence: ${Math.round(s.vote.confidence * 100)}%`}
                     role="progressbar"
                     aria-valuenow={Math.round(s.vote.confidence * 100)}
                     aria-valuemin={0}
@@ -222,7 +204,7 @@ export function VoteCard({ tab, settings, available, onStart }: Props) {
                   title={s.overCeiling ? 'Above the per-vote cost ceiling' : costSource(s.seat.provider)}
                 >
                   {formatUsd(s.costUsd)}
-                  {s.vote ? ` · ${Math.round(s.vote.confidence * 100)}% rating certainty` : ''}
+                  {s.vote ? ` · ${Math.round(s.vote.confidence * 100)}% confidence` : ''}
                 </div>
               </div>
             ))}
@@ -252,7 +234,6 @@ export function VoteCard({ tab, settings, available, onStart }: Props) {
               ) : (
                 <strong>no worker yet</strong>
               )}
-              {tab.tier && tab.tier !== vote.decision ? <span className="muted">({tab.tier} tier)</span> : null}
             </span>
             {awaiting && (
               <>

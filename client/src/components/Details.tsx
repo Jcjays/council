@@ -42,21 +42,25 @@ export function Details({ tab }: { tab: Tab }) {
       <section>
         <h5>Routing</h5>
         <div className="kv">
-          <span className="k">Tier</span>
-          <span className="v">{tab.tier ? <span className={`tier tier-${tab.tier}`}>{tab.tier}</span> : <span className="muted">not voted</span>}</span>
+          <span className="k">Complexity</span>
+          <span className="v">{tab.complexity !== undefined ? `${tab.complexity} / 5` : <span className="muted">not evaluated</span>}</span>
+          <span className="k">Confidence</span>
+          <span className="v">{tab.confidence !== undefined ? `${Math.round(tab.confidence * 100)}%` : <span className="muted">—</span>}</span>
           {tab.vote && (
             <>
-              <span className="k">Vote</span>
+              <span className="k">Evaluation</span>
               <span className="v">
-                {tally(tab.vote)}
-                {tab.vote.tie ? ', tie broken' : ''} · {formatUsd(voteCost)}
+                {formatUsd(voteCost)}
+                {tab.vote.isFallback ? ' · fallback' : ''}
               </span>
             </>
           )}
           {tab.routing?.shiftedFrom && (
             <>
               <span className="k">Shifted</span>
-              <span className="v warn-text">from {tab.routing.shiftedFrom}</span>
+              <span className="v warn-text">
+                from {typeof tab.routing.shiftedFrom === 'string' ? tab.routing.shiftedFrom : tab.routing.shiftedFrom.provider}
+              </span>
             </>
           )}
           <span className="k">Hand-offs</span>

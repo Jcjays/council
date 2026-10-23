@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { formatTokens, PROVIDER_NAMES } from '../lib/format';
-import { PROVIDERS, TIERS, type CliHealth, type Provider, type Seat, type Settings as SettingsT, type Tier } from '../types';
+import { PROVIDERS, type CliHealth, type Provider, type Seat, type Settings as SettingsT } from '../types';
 import { Glyph } from './Glyph';
 import { Health } from './Health';
 
@@ -114,7 +114,6 @@ export function Settings({ settings, onSaved, health, onError }: Props) {
         warnPct: s.warnPct,
         resetDay: s.resetDay,
         seats: s.seats,
-        tierMap: s.tierMap,
         models: s.models,
         autoStart: s.autoStart,
         autoEscalate: s.autoEscalate,
@@ -213,30 +212,6 @@ export function Settings({ settings, onSaved, health, onError }: Props) {
           <Health health={health} onDetectModels={() => void handleDetectModels()} detecting={detecting} />
 
           <section className="card">
-            <header className="card-title">Who does what (Worker Tiers)</header>
-            <p className="muted small">
-              Assign the default worker for each difficulty tier based on codebase scope:
-              <br />
-              • <strong>Easy</strong>: questions, explanations, research, reading docs/URLs, 1 file, copy/config tweaks, typos, simple tests → fast lightweight model
-              <br />
-              • <strong>Medium</strong>: few files, module refactoring, feature with known cause → balanced model
-              <br />
-              • <strong>Hard</strong>: major architecture redesign, cross-cutting multi-file debugging, concurrency, security → deep reasoning model
-            </p>
-            {TIERS.map((t: Tier) => (
-              <div key={t} className="row">
-                <span className={`tier tier-${t}`}>{t}</span>
-                <SeatRow
-                  seat={s.tierMap[t]}
-                  models={s.models}
-                  health={health}
-                  onChange={(ns) => setS({ ...s, tierMap: { ...s.tierMap, [t]: ns } })}
-                />
-              </div>
-            ))}
-          </section>
-
-          <section className="card">
             <header className="card-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span>Auto-Detected Model Ladders</span>
               <button
@@ -301,7 +276,7 @@ export function Settings({ settings, onSaved, health, onError }: Props) {
         <section className="card">
           <header className="card-title">Council seats</header>
           <p className="muted small">
-            Seats vote on task complexity before routing. Between 1 and 5 seats can be configured.
+            Seats analyze task complexity and self-score confidence. The lowest-cost confident seat (≥80%) executes the task. Between 1 and 5 seats can be configured.
           </p>
           {s.seats.map((seat, i) => (
             <SeatRow
@@ -317,7 +292,7 @@ export function Settings({ settings, onSaved, health, onError }: Props) {
             <button
               type="button"
               className="link"
-              onClick={() => setS({ ...s, seats: [...s.seats, { provider: 'gemini', model: 'flash' }] })}
+              onClick={() => setS({ ...s, seats: [...s.seats, { provider: 'gemini', model: 'flash-lite' }] })}
             >
               + add seat
             </button>

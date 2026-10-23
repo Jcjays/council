@@ -54,7 +54,7 @@ export function TabView({ tab, settings, available, stallSeq, details, onToggleD
   };
 
   const settled = tab.status === 'idle' || tab.status === 'failed';
-  const canEscalate = settled && tab.tier !== null && tab.tier !== 'hard';
+  const canEscalate = settled && tab.worker !== null;
   const askingAboutStall = shouldAskAboutStall(tab, stallSeq, dismissedStall);
   const chips = tabChips(tab);
   const drafting = tab.status === 'drafting' && tab.transcript.length === 0;
@@ -71,7 +71,11 @@ export function TabView({ tab, settings, available, stallSeq, details, onToggleD
                 <span className={`sdot${isStreaming(tab) ? ' pulse' : ''}`} />
                 {statusPhrase(tab, now)}
               </span>
-              {tab.tier && <span className={`tier tier-${tab.tier}`}>{tab.tier}</span>}
+              {tab.complexity !== undefined && (
+                <span className="chip" title={`Estimated complexity: ${tab.complexity}/5`}>
+                  Complexity {tab.complexity}/5
+                </span>
+              )}
               {tab.worker && (
                 <span className="pill" title={tab.worker.sessionId ? `session ${tab.worker.sessionId}` : 'no session yet'}>
                   <Glyph provider={tab.worker.provider} />
@@ -178,8 +182,8 @@ export function TabView({ tab, settings, available, stallSeq, details, onToggleD
           {askingAboutStall && (
             <div className="card warn inline-form" role="status">
               <span>{stallMessage(settings.stallMinutes)}. The worker may be stuck.</span>
-              {tab.tier !== null && tab.tier !== 'hard' && (
-                <button disabled={busy} className="primary" onClick={() => void act(() => api.escalate(tab.id))} title="Stop this worker and hand the task to the next tier up">
+              {tab.worker !== null && (
+                <button disabled={busy} className="primary" onClick={() => void act(() => api.escalate(tab.id))} title="Stop this worker and hand the task to a stronger model">
                   Escalate
                 </button>
               )}
@@ -204,6 +208,7 @@ export function TabView({ tab, settings, available, stallSeq, details, onToggleD
           <Transcript
             items={tab.transcript}
             provider={tab.worker?.provider ?? null}
+            running={tab.status === 'running'}
             pathBase={tab.projectRoot}
             voteCard={
               ((tab.vote && (tab.transcript.some((i) => i.kind === 'vote') || tab.status === 'awaiting-start')) || tab.status === 'voting') ? (

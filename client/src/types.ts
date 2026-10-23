@@ -36,7 +36,7 @@ export interface Seat {
 
 export interface SeatResult {
   seat: Seat;
-  vote: { tier: Tier; confidence: number; reason: string } | null;
+  vote: { confidence: number; complexity: number; reason: string } | null;
   costUsd: number;
   durationMs: number;
   error?: string;
@@ -46,9 +46,13 @@ export interface SeatResult {
 
 export interface CouncilResult {
   seats: SeatResult[];
-  decision: Tier;
-  tie: boolean;
-  counts: Record<Tier, number>;
+  selectedSeat: Seat;
+  confidence: number;
+  complexity: number;
+  reason: string;
+  isFallback: boolean;
+  shiftedFrom?: Seat;
+  exhaustedNotice?: string;
 }
 
 export interface Tab {
@@ -57,11 +61,13 @@ export interface Tab {
   projectRoot: string;
   title: string;
   status: TabStatus;
-  tier: Tier | null;
+  complexity?: number;
+  confidence?: number;
+  tier?: Tier | null;
   worker: TabWorker | null;
   previousWorkers: TabWorker[];
   vote: CouncilResult | null;
-  routing: { shiftedFrom?: Tier; reason?: string; notes?: string[] } | null;
+  routing: { reason?: string; notes?: string[]; isFallback?: boolean; exhaustedNotice?: string; shiftedFrom?: Seat | string } | null;
   transcript: TranscriptItem[];
   costUsd: number;
   fullAuto: boolean;
@@ -155,7 +161,6 @@ export interface Settings {
   warnPct: number;
   resetDay: number;
   seats: Seat[];
-  tierMap: Record<Tier, Seat>;
   autoStart: boolean;
   autoEscalate: boolean;
   stallMinutes: number;
@@ -167,11 +172,10 @@ export interface Settings {
   projectOverrides: Record<string, Partial<Pick<Settings, 'allowedCommands' | 'autoStart' | 'autoEscalate'>>>;
 }
 
-/** The council and tier map in force given which CLIs are installed and signed in. */
+/** The council in force given which CLIs are installed and signed in. */
 export interface EffectiveRouting {
   available: Provider[];
   seats: Seat[];
-  tierMap: Record<Tier, Seat>;
   notes: string[];
 }
 
