@@ -1,23 +1,11 @@
-import { TIER_ORDER, type Tier } from '../adapters/types.js';
-
-export interface Tally {
-  decision: Tier;
-  counts: Record<Tier, number>;
-  tie: boolean;
-}
+import type { Vote } from './vote.js';
 
 /**
- * Majority wins. A three-way split lands on medium. A two-way tie goes to the
- * higher tier (over-serving slightly beats under-serving). No votes → medium.
+ * Calculates consensus complexity as the rounded average of valid seat votes,
+ * clamped to 1..5. Defaults to 3 if no votes are provided.
  */
-export function tally(tiers: Tier[]): Tally {
-  const counts: Record<Tier, number> = { easy: 0, medium: 0, hard: 0 };
-  for (const t of tiers) counts[t] += 1;
-  if (tiers.length === 0) return { decision: 'medium', counts, tie: false };
-
-  const max = Math.max(counts.easy, counts.medium, counts.hard);
-  const top = TIER_ORDER.filter((t) => counts[t] === max);
-  if (top.length === 1) return { decision: top[0] as Tier, counts, tie: false };
-  if (top.length === 3) return { decision: 'medium', counts, tie: true };
-  return { decision: top[top.length - 1] as Tier, counts, tie: true };
+export function consensusComplexity(votes: Vote[]): number {
+  if (votes.length === 0) return 3;
+  const avg = votes.reduce((sum, v) => sum + v.complexity, 0) / votes.length;
+  return Math.min(5, Math.max(1, Math.round(avg)));
 }

@@ -48,8 +48,15 @@ export class FakeAdapter implements Adapter {
   }
 }
 
-export function voteEvents(tier: string, confidence = 0.8, reason = 'because', costUsd: number | undefined = 0.001): AdapterEvent[] {
-  const text = JSON.stringify({ tier, confidence, reason });
+export function voteEvents(
+  confidenceOrTier: number | string = 0.8,
+  complexityOrConfidence = 2,
+  reason = 'because',
+  costUsd: number | undefined = 0.001,
+): AdapterEvent[] {
+  const confidence = typeof confidenceOrTier === 'number' ? confidenceOrTier : 0.8;
+  const complexity = typeof complexityOrConfidence === 'number' ? complexityOrConfidence : 2;
+  const text = JSON.stringify({ confidence, complexity, reason });
   return [
     { type: 'text', text },
     { type: 'result', usage: { inputTokens: 100, cachedInputTokens: 0, outputTokens: 20 }, costUsd, exitCode: 0, isError: false, text },

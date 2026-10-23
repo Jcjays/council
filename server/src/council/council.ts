@@ -1,7 +1,7 @@
-import type { Adapter, AdapterEvent, Provider, QuotaWindow, ResultEvent, Tier } from '../adapters/types.js';
+import type { Adapter, AdapterEvent, Provider, QuotaWindow, ResultEvent } from '../adapters/types.js';
 import { costFor, type PriceTable } from '../ledger/pricing.js';
 import { buildVotePrompt } from './prompt.js';
-import { tally } from './tally.js';
+import { selectSeat } from './routing.js';
 import { extractVote, VOTE_JSON_SCHEMA, type Vote } from './vote.js';
 
 export interface Seat {
@@ -22,9 +22,12 @@ export interface SeatResult {
 
 export interface CouncilResult {
   seats: SeatResult[];
-  decision: Tier;
-  tie: boolean;
-  counts: Record<Tier, number>;
+  selectedSeat: Seat;
+  confidence: number;
+  complexity: number;
+  reason: string;
+  isFallback: boolean;
+  exhaustedNotice?: string;
 }
 
 export interface CouncilArgs {
@@ -125,10 +128,18 @@ async function runSeat(seat: Seat, a: CouncilArgs, prompt: string): Promise<Seat
   };
 }
 
-/** Runs every seat in parallel on the same prompt and tallies the votes that came back. */
+/** Runs every seat in parallel on the same prompt and selects the winning seat. */
 export async function runCouncil(a: CouncilArgs): Promise<CouncilResult> {
   const prompt = buildVotePrompt(a.task, a.snapshot);
   const seats = await Promise.all(a.seats.map((seat) => runSeat(seat, a, prompt)));
-  const t = tally(seats.flatMap((s) => (s.vote ? [s.vote.tier] : [])));
-  return { seats, decision: t.decision, tie: t.tie, counts: t.counts };
+  const decision = selectSeat(seats, a.pricing);
+  return {
+    seats,
+    selectedSeat: decision.selectedSeat,
+    confidence: decision.confidence,
+    complexity: decision.complexity,
+    reason: decision.reason,
+    isFallback: decision.isFallback,
+    exhaustedNotice: decision.exhaustedNotice,
+  };
 }

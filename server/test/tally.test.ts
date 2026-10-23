@@ -1,24 +1,24 @@
 import { expect, test } from 'vitest';
-import { tally } from '../src/council/tally.js';
+import { consensusComplexity } from '../src/council/tally.js';
+import type { Vote } from '../src/council/vote.js';
 
-test('majority wins', () => {
-  expect(tally(['easy', 'easy', 'hard'])).toEqual({ decision: 'easy', counts: { easy: 2, medium: 0, hard: 1 }, tie: false });
+test('calculates consensus complexity as average of votes', () => {
+  const votes: Vote[] = [
+    { confidence: 0.9, complexity: 1, reason: 'r1' },
+    { confidence: 0.8, complexity: 2, reason: 'r2' },
+    { confidence: 0.7, complexity: 3, reason: 'r3' },
+  ];
+  expect(consensusComplexity(votes)).toBe(2);
 });
 
-test('a three-way split goes to medium', () => {
-  expect(tally(['easy', 'medium', 'hard'])).toEqual({ decision: 'medium', counts: { easy: 1, medium: 1, hard: 1 }, tie: true });
+test('clamps consensus complexity between 1 and 5', () => {
+  const low: Vote[] = [{ confidence: 0.9, complexity: 1, reason: 'r' }];
+  expect(consensusComplexity(low)).toBe(1);
+
+  const high: Vote[] = [{ confidence: 0.5, complexity: 5, reason: 'r' }];
+  expect(consensusComplexity(high)).toBe(5);
 });
 
-test('a two-way tie goes to the higher tier', () => {
-  expect(tally(['easy', 'hard'])).toMatchObject({ decision: 'hard', tie: true });
-  expect(tally(['medium', 'medium', 'hard', 'hard'])).toMatchObject({ decision: 'hard', tie: true });
-  expect(tally(['easy', 'easy', 'medium', 'medium'])).toMatchObject({ decision: 'medium', tie: true });
-});
-
-test('an empty council defaults to medium without a tie', () => {
-  expect(tally([])).toEqual({ decision: 'medium', counts: { easy: 0, medium: 0, hard: 0 }, tie: false });
-});
-
-test('a single vote is the decision', () => {
-  expect(tally(['hard'])).toMatchObject({ decision: 'hard', tie: false });
+test('defaults to 3 when no votes are present', () => {
+  expect(consensusComplexity([])).toBe(3);
 });
