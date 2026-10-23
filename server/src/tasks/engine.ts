@@ -1,17 +1,17 @@
 import { EventEmitter } from 'node:events';
-import { PROVIDERS, TIER_ORDER, type Adapter, type CliHealth, type Provider, type QuotaWindow, type ResultEvent, type Tier } from '../adapters/types.js';
+import { PROVIDERS, type Adapter, type CliHealth, type Provider, type QuotaWindow, type ResultEvent } from '../adapters/types.js';
 import { effectiveSettings, type Settings } from '../config/settings.js';
 import { runCouncil, type Seat } from '../council/council.js';
 import { effectiveRouting, type EffectiveRouting } from '../council/effective.js';
-import { route } from '../council/routing.js';
+import { nextStrongerSeat } from '../council/routing.js';
 import { repoSnapshot } from '../council/snapshot.js';
 import { budgetState, type BudgetState, type ProviderUsage } from '../ledger/budget.js';
-import { appendEntry, currentPeriod, readEntries, sumPeriod } from '../ledger/ledger.js';
+import { appendEntry, currentPeriod, readEntries, sumPeriod, type LedgerEntry } from '../ledger/ledger.js';
 import { costFor, lookupPrice, type PriceTable } from '../ledger/pricing.js';
 import { diffStat as gitDiffStat } from '../worktrees/git.js';
 import { clipText, clipValue } from './clip.js';
 import { buildHandoffPrompt, buildSummaryPrompt, mechanicalSummary } from './handoff.js';
-import { canEscalate, transition, type TabStatus } from './state.js';
+import { transition, type TabStatus } from './state.js';
 import { newId, newTab, type TabStore } from './store.js';
 import type { Tab, TabWorker, TranscriptItem, TranscriptKind } from './types.js';
 
@@ -44,7 +44,12 @@ interface ActiveRun {
   finish: () => void;
 }
 
-const SAVE_DEBOUNCE_MS = 300;
+/**
+ * A streaming worker's transcript is saved at most this often. The live view comes
+ * over the WebSocket; the file only has to be right for a restart, and rewriting a
+ * long transcript several times a second is pure disk churn.
+ */
+const SAVE_DEBOUNCE_MS = 3_000;
 const CLOSE_WAIT_MS = 5_000;
 
 function label(w: WorkerPick): string {
@@ -69,6 +74,8 @@ export class TaskEngine extends EventEmitter {
   private readonly saveTimers = new Map<string, NodeJS.Timeout>();
   private readonly usageByProvider: Partial<Record<Provider, ProviderUsage>> = {};
   private readonly now: () => Date;
+  /** Resolved ledger, loaded on first use. */
+  private entries?: Promise<LedgerEntry[]>;
 
   constructor(private readonly deps: EngineDeps) {
     super();
@@ -101,14 +108,25 @@ export class TaskEngine extends EventEmitter {
         this.addItem(tab, 'system', 'Council was restarted while this tab was running; the worker process is gone.');
         await this.deps.store.save(tab);
       }
+      if (tab.vote && !tab.transcript.some((i) => i.kind === 'vote') && tab.status !== 'awaiting-start') {
+        tab.vote = null;
+        tab.routing = null;
+        await this.deps.store.save(tab);
+      }
       this.tabs.set(tab.id, tab);
     }
     return this.listTabs(projectId);
   }
 
+  /** The ledger, read from disk once and kept in step by `record()`; it only ever grows. */
+  private async ledgerEntries(): Promise<LedgerEntry[]> {
+    this.entries ??= readEntries(this.deps.ledgerFile);
+    return this.entries;
+  }
+
   async budgets(): Promise<Record<Provider, BudgetState>> {
     const s = this.deps.settings();
-    const entries = await readEntries(this.deps.ledgerFile);
+    const entries = await this.ledgerEntries();
     const { start, end } = currentPeriod(this.now(), s.resetDay);
     const sums = sumPeriod(entries, start, end);
     return Object.fromEntries(
@@ -155,7 +173,6 @@ export class TaskEngine extends EventEmitter {
 
     if (mode.kind === 'manual') {
       tab.worker = { provider: mode.provider, model: mode.model, sessionId: null };
-      tab.tier = this.tierFor(tab, mode.provider) ?? 'medium';
       tab.status = transition(tab.status, 'submit-manual');
       await this.touch(tab);
       this.spawn(tab, () => this.runWorker(tab, text));
@@ -173,7 +190,6 @@ export class TaskEngine extends EventEmitter {
     this.require(tab, ['awaiting-start']);
     if (override) {
       tab.worker = { provider: override.provider, model: override.model, sessionId: null };
-      tab.tier = this.tierFor(tab, override.provider) ?? tab.tier;
       this.addItem(tab, 'system', `Developer chose ${label(override)} instead of the council's pick.`);
     }
     tab.status = transition(tab.status, 'start');
@@ -196,7 +212,10 @@ export class TaskEngine extends EventEmitter {
   async escalate(tabId: string): Promise<Tab> {
     const tab = this.must(tabId);
     this.require(tab, ['idle', 'failed']);
-    if (!tab.tier || !canEscalate(tab.tier)) throw new Error('this tab is already at the top tier');
+    const eff = this.routing(tab.projectId);
+    if (!tab.worker || !nextStrongerSeat(tab.worker, eff.seats, this.deps.pricing())) {
+      throw new Error('no stronger council seat available to escalate to');
+    }
     const from = await this.prepareHandoff(tab, 'escalate');
     this.spawn(tab, () => this.finishHandoff(tab, from, 'escalate'));
     return tab;
@@ -224,6 +243,28 @@ export class TaskEngine extends EventEmitter {
     tab.status = transition(tab.status, 'close');
     await this.touch(tab);
     if (run) await Promise.race([run.done, new Promise<void>((r) => setTimeout(r, CLOSE_WAIT_MS))]);
+    return tab;
+  }
+
+  async clearContext(tabId: string): Promise<Tab> {
+    const tab = this.must(tabId);
+    this.require(tab, ['idle', 'failed']);
+    tab.status = transition(tab.status, 'clear-context');
+    tab.worker = null;
+    tab.previousWorkers = [];
+    tab.tier = null;
+    tab.complexity = undefined;
+    tab.confidence = undefined;
+    tab.vote = null;
+    tab.routing = null;
+    const item: TranscriptItem = {
+      id: newId(),
+      ts: this.now().toISOString(),
+      kind: 'system',
+      text: 'Context cleared. Chat transcript reset; describe a task below to have the council vote and route it again.',
+    };
+    tab.transcript = [item];
+    await this.touch(tab);
     return tab;
   }
 
@@ -257,11 +298,6 @@ export class TaskEngine extends EventEmitter {
   private availableProviders(): Provider[] {
     const unavailable = this.unavailable();
     return PROVIDERS.filter((p) => !unavailable.includes(p));
-  }
-
-  private tierFor(tab: Tab, provider: Provider): Tier | null {
-    const map = this.routing(tab.projectId).tierMap;
-    return TIER_ORDER.find((t) => map[t].provider === provider) ?? null;
   }
 
   private taskText(tab: Tab): string {
@@ -315,7 +351,7 @@ export class TaskEngine extends EventEmitter {
 
   private async record(tab: Tab, provider: Provider, model: string | null, purpose: 'vote' | 'work' | 'summarize', ev: ResultEvent): Promise<number> {
     const costUsd = ev.costUsd ?? costFor(provider, model, ev.usage, this.deps.pricing());
-    await appendEntry(this.deps.ledgerFile, {
+    const entry: LedgerEntry = {
       ts: this.now().toISOString(),
       provider,
       model,
@@ -324,10 +360,31 @@ export class TaskEngine extends EventEmitter {
       projectId: tab.projectId,
       usage: ev.usage,
       costUsd,
-    });
+    };
+    (await this.ledgerEntries()).push(entry);
+    await appendEntry(this.deps.ledgerFile, entry);
     tab.costUsd += costUsd;
     this.emit('ledger', { tabId: tab.id, provider, costUsd });
     return costUsd;
+  }
+
+  /**
+   * Registers a phase that is not a worker run (a vote, a hand-off summary) so
+   * `close()` aborts its CLIs instead of leaving them to finish and bill.
+   */
+  private async tracked<T>(tab: Tab, fn: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    let finish: () => void = () => {};
+    const done = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const run: ActiveRun = { ac: new AbortController(), done, finish };
+    this.runs.set(tab.id, run);
+    try {
+      return await fn(run.ac.signal);
+    } finally {
+      if (this.runs.get(tab.id) === run) this.runs.delete(tab.id);
+      run.finish();
+    }
   }
 
   private async runVote(tab: Tab, task: string): Promise<void> {
@@ -335,28 +392,39 @@ export class TaskEngine extends EventEmitter {
     const eff = this.routing(tab.projectId);
     const cwd = tab.projectRoot;
     const snapshot = await (this.deps.snapshot ?? repoSnapshot)(cwd);
-    const result = await runCouncil({
-      seats: eff.seats,
-      adapters: this.deps.adapters,
-      task,
-      cwd,
-      snapshot,
-      pricing: this.deps.pricing(),
-      timeoutMs: s.seatTimeoutMs,
-      costCeiling: s.voteCostCeiling,
-      onResult: async (provider, model, ev) => {
-        await this.record(tab, provider, model, 'vote', ev);
-      },
-      onQuota: (provider, windows) => this.noteUsage(provider, windows),
-    });
+    const result = await this.tracked(tab, async (signal) =>
+      runCouncil({
+        seats: eff.seats,
+        adapters: this.deps.adapters,
+        task,
+        cwd,
+        snapshot,
+        pricing: this.deps.pricing(),
+        budgets: await this.budgets(),
+        unavailable: this.unavailable(),
+        timeoutMs: s.seatTimeoutMs,
+        costCeiling: s.voteCostCeiling,
+        signal,
+        onResult: async (provider, model, ev) => {
+          await this.record(tab, provider, model, 'vote', ev);
+        },
+        onQuota: (provider, windows) => this.noteUsage(provider, windows),
+      }),
+    );
     if (isClosed(tab)) return;
 
     tab.vote = result;
-    const decision = route(result.decision, eff.tierMap, await this.budgets(), this.unavailable());
-    tab.tier = decision.tier;
-    tab.routing = { shiftedFrom: decision.shiftedFrom, reason: decision.reason, notes: eff.notes };
-    tab.worker = { provider: decision.provider, model: decision.model, sessionId: null };
-    this.addItem(tab, 'vote', undefined, { council: result, routing: decision, notes: eff.notes });
+    tab.complexity = result.complexity;
+    tab.confidence = result.confidence;
+    tab.worker = { provider: result.selectedSeat.provider, model: result.selectedSeat.model, sessionId: null };
+    tab.routing = {
+      reason: result.reason,
+      notes: eff.notes,
+      isFallback: result.isFallback,
+      shiftedFrom: result.shiftedFrom,
+      exhaustedNotice: result.exhaustedNotice,
+    };
+    this.addItem(tab, 'vote', undefined, { council: result, routing: tab.routing, notes: eff.notes });
 
     if (s.autoStart) {
       tab.status = transition(tab.status, 'vote-done-autostart');
@@ -471,7 +539,9 @@ export class TaskEngine extends EventEmitter {
     }
 
     tab.status = transition(tab.status, 'worker-failed');
-    if (s.autoEscalate && tab.escalations === 0 && tab.tier && canEscalate(tab.tier)) {
+    const eff = this.routing(tab.projectId);
+    const canStepUp = tab.worker && nextStrongerSeat(tab.worker, eff.seats, this.deps.pricing()) !== null;
+    if (s.autoEscalate && tab.escalations === 0 && canStepUp) {
       // Go straight to handing-off; prepareHandoff announces the new state.
       const from = await this.prepareHandoff(tab, 'escalate');
       await this.finishHandoff(tab, from, 'escalate');
@@ -487,16 +557,12 @@ export class TaskEngine extends EventEmitter {
     let next: TabWorker;
 
     if (reason === 'escalate') {
-      const idx = TIER_ORDER.indexOf(tab.tier ?? 'easy');
-      const nextTier = TIER_ORDER[Math.min(idx + 1, TIER_ORDER.length - 1)] as Tier;
-      const r = route(nextTier, eff.tierMap, await this.budgets(), this.unavailable());
-      tab.tier = r.tier;
-      tab.routing = { shiftedFrom: r.shiftedFrom, reason: r.reason, notes: eff.notes };
+      const nextSeat = nextStrongerSeat(from, eff.seats, this.deps.pricing());
+      if (!nextSeat) throw new Error('no stronger council seat available to escalate to');
       tab.escalations += 1;
-      next = { provider: r.provider, model: r.model, sessionId: null };
+      next = { provider: nextSeat.provider, model: nextSeat.model, sessionId: null };
     } else {
       if (!target) throw new Error('switch needs a target worker');
-      tab.tier = this.tierFor(tab, target.provider) ?? tab.tier;
       next = { provider: target.provider, model: target.model, sessionId: null };
     }
 
@@ -510,7 +576,7 @@ export class TaskEngine extends EventEmitter {
       tab,
       'system',
       reason === 'escalate'
-        ? `Escalated from ${label(from)} to ${label(next)} (${tab.tier}).`
+        ? `Escalated from ${label(from)} to ${label(next)}.`
         : `Switched from ${label(from)} to ${label(next)}${next.sessionId ? ', resuming its earlier session' : ''}.`,
     );
     await this.touch(tab);
@@ -545,6 +611,10 @@ export class TaskEngine extends EventEmitter {
     const s = this.settingsFor(tab);
     const seat = this.cheapestSeat(s.seats.filter((seat) => !this.unavailable().includes(seat.provider)));
     if (!seat) return mechanicalSummary(tab.transcript);
+    return this.tracked(tab, (cancel) => this.summarizeWith(tab, seat, s, cancel));
+  }
+
+  private async summarizeWith(tab: Tab, seat: Seat, s: Settings, cancel: AbortSignal): Promise<string> {
     try {
       let text = '';
       const events = this.deps.adapters[seat.provider].run({
@@ -554,7 +624,7 @@ export class TaskEngine extends EventEmitter {
         purpose: 'summarize',
         fullAuto: false,
         allowedCommands: [],
-        signal: AbortSignal.timeout(s.seatTimeoutMs),
+        signal: AbortSignal.any([cancel, AbortSignal.timeout(s.seatTimeoutMs)]),
       });
       for await (const ev of events) {
         if (ev.type === 'text') text += ev.text;

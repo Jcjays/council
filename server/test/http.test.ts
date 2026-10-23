@@ -58,7 +58,6 @@ test('GET /api/health returns one entry per provider', async () => {
   expect(Object.keys(r.json).sort()).toEqual(['claude', 'codex', 'gemini']);
   expect(r.json.codex).toMatchObject({ installed: false });
 });
-
 test('GET /api/settings returns the settings and PUT merges and persists a change', async () => {
   const before = await api('GET', '/api/settings');
   expect(before.json.autoStart).toBe(false);
@@ -72,6 +71,40 @@ test('GET /api/settings returns the settings and PUT merges and persists a chang
   await api('PUT', '/api/settings', { autoStart: false });
 });
 
+test('POST /api/settings/detect-models merges detected models from health into settings', async () => {
+  const res = await api('POST', '/api/settings/detect-models');
+  expect(res.status).toBe(200);
+  expect(res.json.models).toBeDefined();
+});
+
+test('POST /api/settings/detect-budgets auto-populates budgets from health', async () => {
+  const res = await api('POST', '/api/settings/detect-budgets');
+  expect(res.status).toBe(200);
+  expect(res.json.budgets).toBeDefined();
+});
+
+test('tabs: clear-context resets worker sessionId and appends system note', async () => {
+  const t = await api('POST', '/api/tabs', { projectRoot: 'C:/proj', title: 'test-clear' });
+  const id = t.json.id;
+  await api('POST', `/api/tabs/${id}/submit`, { text: 'do something', mode: { kind: 'manual', provider: 'claude' }, fullAuto: false });
+  // Wait for worker to finish or be idle
+  await new Promise((r) => setTimeout(r, 100));
+  const res = await api('POST', `/api/tabs/${id}/clear-context`);
+  expect(res.status).toBe(200);
+  expect(res.json.status).toBe('drafting');
+  expect(res.json.worker).toBeNull();
+  expect(res.json.vote).toBeNull();
+  expect(res.json.routing).toBeNull();
+  expect(res.json.transcript.some((i: any) => i.kind === 'system' && i.text.includes('Context cleared'))).toBe(true);
+});
+
+test('GET /api/plans returns detected plans and skills', async () => {
+  const res = await api('GET', '/api/plans');
+  expect(res.status).toBe(200);
+  expect(Array.isArray(res.json.plans)).toBe(true);
+  expect(Array.isArray(res.json.skills)).toBe(true);
+});
+
 test('GET /api/pricing returns the table and PUT replaces an entry', async () => {
   const r = await api('GET', '/api/pricing');
   expect(r.json.flash).toBeDefined();
@@ -81,12 +114,11 @@ test('GET /api/pricing returns the table and PUT replaces an entry', async () =>
   expect(put.json.pro).toBeDefined();
 });
 
-test('GET /api/routing describes the effective council and tier map', async () => {
+test('GET /api/routing describes the effective council and available seats', async () => {
   const r = await api('GET', '/api/routing');
   expect(r.status).toBe(200);
   expect(r.json.available).toBeInstanceOf(Array);
   expect(r.json.seats).toBeInstanceOf(Array);
-  expect(Object.keys(r.json.tierMap).sort()).toEqual(['easy', 'hard', 'medium']);
   expect(r.json.notes).toBeInstanceOf(Array);
 });
 
@@ -96,14 +128,27 @@ test('GET /api/budgets returns the three providers', async () => {
   expect(r.json.gemini).toMatchObject({ limit: 30, spent: 0 });
 });
 
+test('PUT /api/settings keeps the recent-project list the server maintains', async () => {
+  await api('POST', '/api/projects', { path: process.cwd() });
+  const before = (await api('GET', '/api/settings')).json.recentProjects as string[];
+  expect(before.length).toBeGreaterThan(0);
+
+  // A settings form that loaded before the project was opened still holds the old list.
+  const saved = await api('PUT', '/api/settings', { autoStart: true, recentProjects: [] });
+  expect(saved.status).toBe(200);
+  expect(saved.json.autoStart).toBe(true);
+  expect(saved.json.recentProjects).toEqual(before);
+});
+
 test('tabs: create, list, get, submit; the websocket streams the tab updates', async () => {
   const ws = new WebSocket(`${base.replace('http', 'ws')}/ws`);
   const messages: any[] = [];
+  // Listen before the handshake settles: `hello` can arrive in the same tick as `open`.
+  ws.on('message', (data) => messages.push(JSON.parse(String(data))));
   await new Promise<void>((resolve, reject) => {
     ws.on('open', () => resolve());
     ws.on('error', reject);
   });
-  ws.on('message', (data) => messages.push(JSON.parse(String(data))));
 
   const created = await api('POST', '/api/tabs', { projectRoot: 'C:/proj', title: 'Rename' });
   expect(created.status).toBe(201);
@@ -127,7 +172,7 @@ test('tabs: create, list, get, submit; the websocket streams the tab updates', a
   expect(messages.some((m) => m.type === 'item' && m.tabId === id && m.item.kind === 'vote')).toBe(true);
   const final = messages.filter((m) => m.type === 'tab' && m.tab.id === id).at(-1);
   expect(final.tab.status).toBe('awaiting-start');
-  expect(final.tab.worker.provider).toBe('gemini');
+  expect(['gemini', 'codex']).toContain(final.tab.worker.provider);
 
   const started = await api('POST', `/api/tabs/${id}/start`, { provider: 'claude', model: 'claude-sonnet-5-5' });
   expect(started.json.worker).toMatchObject({ provider: 'claude', model: 'claude-sonnet-5-5' });
@@ -147,6 +192,18 @@ test('POST /api/projects validates the path and registers it as recent', async (
   const notRepo = await api('POST', '/api/projects', { path: fixture.home });
   expect(notRepo.status).toBe(400);
   expect(String(notRepo.json.error)).toMatch(/git/i);
+});
+
+test('GET /api/projects/discover and browse return directory metadata', async () => {
+  const disc = await api('GET', '/api/projects/discover');
+  expect(disc.status).toBe(200);
+  expect(disc.json.currentCwd).toBeDefined();
+  expect(Array.isArray(disc.json.projects)).toBe(true);
+
+  const browse = await api('GET', '/api/projects/browse');
+  expect(browse.status).toBe(200);
+  expect(browse.json.current).toBeDefined();
+  expect(Array.isArray(browse.json.directories)).toBe(true);
 });
 
 test('errors are JSON: 404 for unknown routes, 400 for bad bodies and wrong-state actions', async () => {

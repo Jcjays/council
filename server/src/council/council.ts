@@ -1,7 +1,7 @@
-import type { Adapter, AdapterEvent, Provider, QuotaWindow, ResultEvent, Tier } from '../adapters/types.js';
+import type { Adapter, AdapterEvent, Provider, QuotaWindow, ResultEvent } from '../adapters/types.js';
 import { costFor, type PriceTable } from '../ledger/pricing.js';
 import { buildVotePrompt } from './prompt.js';
-import { tally } from './tally.js';
+import { selectSeat } from './routing.js';
 import { extractVote, VOTE_JSON_SCHEMA, type Vote } from './vote.js';
 
 export interface Seat {
@@ -22,9 +22,13 @@ export interface SeatResult {
 
 export interface CouncilResult {
   seats: SeatResult[];
-  decision: Tier;
-  tie: boolean;
-  counts: Record<Tier, number>;
+  selectedSeat: Seat;
+  confidence: number;
+  complexity: number;
+  reason: string;
+  isFallback: boolean;
+  shiftedFrom?: Seat;
+  exhaustedNotice?: string;
 }
 
 export interface CouncilArgs {
@@ -38,8 +42,12 @@ export interface CouncilArgs {
   /** Called when a seat's CLI reports the account's usage windows. */
   onQuota?: (provider: Provider, windows: QuotaWindow[]) => void;
   pricing: PriceTable;
+  budgets?: Partial<Record<Provider, any>>;
+  unavailable?: Provider[];
   timeoutMs?: number;
   costCeiling?: number;
+  /** Cancels every seat, e.g. because the tab was closed mid-vote. */
+  signal?: AbortSignal;
   env?: NodeJS.ProcessEnv;
 }
 
@@ -69,6 +77,7 @@ async function runSeat(seat: Seat, a: CouncilArgs, prompt: string): Promise<Seat
   const ceiling = a.costCeiling ?? DEFAULT_VOTE_COST_CEILING;
   const started = Date.now();
   const ac = new AbortController();
+  const signal = a.signal ? AbortSignal.any([ac.signal, a.signal]) : ac.signal;
   const timer = setTimeout(() => ac.abort(), timeoutMs);
 
   let streamed = '';
@@ -84,11 +93,11 @@ async function runSeat(seat: Seat, a: CouncilArgs, prompt: string): Promise<Seat
       purpose: 'vote',
       fullAuto: false,
       allowedCommands: [],
-      signal: ac.signal,
+      signal,
       jsonSchema: VOTE_JSON_SCHEMA,
       env: a.env,
     });
-    for await (const ev of untilAbort(events, ac.signal)) {
+    for await (const ev of untilAbort(events, signal)) {
       if (ev.type === 'text') streamed += ev.text;
       else if (ev.type === 'quota') a.onQuota?.(seat.provider, ev.windows);
       else if (ev.type === 'error') error = ev.message;
@@ -99,6 +108,7 @@ async function runSeat(seat: Seat, a: CouncilArgs, prompt: string): Promise<Seat
       }
     }
     if (ac.signal.aborted) error = `timed out after ${timeoutMs} ms`;
+    else if (a.signal?.aborted) error = 'the vote was cancelled';
   } catch (err) {
     error = err instanceof Error ? err.message : String(err);
   } finally {
@@ -121,10 +131,19 @@ async function runSeat(seat: Seat, a: CouncilArgs, prompt: string): Promise<Seat
   };
 }
 
-/** Runs every seat in parallel on the same prompt and tallies the votes that came back. */
+/** Runs every seat in parallel on the same prompt and selects the winning seat. */
 export async function runCouncil(a: CouncilArgs): Promise<CouncilResult> {
   const prompt = buildVotePrompt(a.task, a.snapshot);
   const seats = await Promise.all(a.seats.map((seat) => runSeat(seat, a, prompt)));
-  const t = tally(seats.flatMap((s) => (s.vote ? [s.vote.tier] : [])));
-  return { seats, decision: t.decision, tie: t.tie, counts: t.counts };
+  const decision = selectSeat(seats, a.pricing, a.budgets, a.unavailable);
+  return {
+    seats,
+    selectedSeat: decision.selectedSeat,
+    confidence: decision.confidence,
+    complexity: decision.complexity,
+    reason: decision.reason,
+    isFallback: decision.isFallback,
+    shiftedFrom: decision.shiftedFrom,
+    exhaustedNotice: decision.exhaustedNotice,
+  };
 }

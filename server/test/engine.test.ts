@@ -85,9 +85,9 @@ test('auto submit: council votes, tab waits for start, then the worker streams t
   const tab = await engine.createTab('C:/proj', 'Rename foo');
   await engine.submit(tab.id, 'Rename foo to bar in src/a.ts', { kind: 'auto' });
   const voted = await waitFor(engine, tab.id, ['awaiting-start']);
-  expect(voted.tier).toBe('easy');
+  expect(voted.complexity).toBe(2);
   expect(voted.vote?.seats).toHaveLength(3);
-  expect(voted.worker).toEqual({ provider: 'gemini', model: 'flash', sessionId: null });
+  expect(voted.worker).toEqual({ provider: 'gemini', model: 'flash-lite', sessionId: null });
   expect(voted.transcript.map((i) => i.kind)).toEqual(['user', 'vote']);
   const votes = await readEntries(ledgerFile);
   expect(votes).toHaveLength(3);
@@ -104,7 +104,7 @@ test('auto submit: council votes, tab waits for start, then the worker streams t
   expect(all.filter((e) => e.purpose === 'work')).toHaveLength(1);
   expect(idle.costUsd).toBeCloseTo(0.001 * 3 + 0.01, 6);
   const workCall = adapters.gemini.calls.find((c) => c.purpose === 'work');
-  expect(workCall).toMatchObject({ cwd: 'C:/proj', model: 'flash', prompt: 'Rename foo to bar in src/a.ts', fullAuto: false });
+  expect(workCall).toMatchObject({ cwd: 'C:/proj', model: 'flash-lite', prompt: 'Rename foo to bar in src/a.ts', fullAuto: false });
   expect(workCall?.resumeId).toBeUndefined();
   expect(workCall?.allowedCommands).toEqual(DEFAULT_SETTINGS.allowedCommands);
 });
@@ -124,7 +124,6 @@ test('manual submit skips the council and derives the tier from the chosen provi
   await engine.submit(tab.id, 'do it', { kind: 'manual', provider: 'claude', model: 'claude-sonnet-5-5' }, { fullAuto: true });
   const idle = await waitFor(engine, tab.id, ['idle']);
   expect(idle.vote).toBeNull();
-  expect(idle.tier).toBe('hard');
   expect(idle.worker).toMatchObject({ provider: 'claude', model: 'claude-sonnet-5-5', sessionId: 'claude-session' });
   expect(idle.fullAuto).toBe(true);
   const entries = await readEntries(ledgerFile);
@@ -141,7 +140,7 @@ test('a follow-up message resumes the worker session', async () => {
   const idle = await waitFor(engine, tab.id, ['idle']);
   const calls = adapters.gemini.calls.filter((c) => c.purpose === 'work');
   expect(calls).toHaveLength(2);
-  expect(calls[1]).toMatchObject({ prompt: 'and also this', resumeId: 'gemini-session', model: 'flash' });
+  expect(calls[1]).toMatchObject({ prompt: 'and also this', resumeId: 'gemini-session', model: 'flash-lite' });
   expect(idle.transcript.filter((i) => i.kind === 'user').map((i) => i.text)).toEqual(['first', 'and also this']);
 });
 
@@ -153,9 +152,8 @@ test('a worker failure auto-escalates once with a summary hand-off, and a second
   await engine.submit(tab.id, 'Hard thing please', { kind: 'auto' });
   const failed = await waitFor(engine, tab.id, ['failed'], 8000);
   expect(failed.worker?.provider).toBe('codex');
-  expect(failed.tier).toBe('medium');
   expect(failed.escalations).toBe(1);
-  expect(failed.previousWorkers).toEqual([{ provider: 'gemini', model: 'flash', sessionId: 'g-sess' }]);
+  expect(failed.previousWorkers).toEqual([{ provider: 'gemini', model: 'flash-lite', sessionId: 'g-sess' }]);
   const handoff = codex.calls.find((c) => c.purpose === 'work');
   expect(handoff?.prompt).toContain('SUMMARY TEXT');
   expect(handoff?.prompt).toContain(' a.txt | 1 +');
@@ -186,7 +184,7 @@ test('switching provider hands off with a summary and keeps the old session for 
   await engine.switchWorker(tab.id, 'claude', 'claude-sonnet-5-5');
   const onClaude = await waitFor(engine, tab.id, ['idle']);
   expect(onClaude.worker).toMatchObject({ provider: 'claude', model: 'claude-sonnet-5-5', sessionId: 'claude-session' });
-  expect(onClaude.previousWorkers).toEqual([{ provider: 'gemini', model: 'flash', sessionId: 'gemini-session' }]);
+  expect(onClaude.previousWorkers).toEqual([{ provider: 'gemini', model: 'flash-lite', sessionId: 'gemini-session' }]);
   expect(onClaude.escalations).toBe(0);
   const claudeCall = adapters.claude.calls.find((c) => c.purpose === 'work');
   expect(claudeCall?.prompt).toContain('SUMMARY TEXT');
@@ -216,6 +214,33 @@ test('changing only the model keeps the session and takes effect on the next mes
   expect(calls[1]).toMatchObject({ model: 'pro', resumeId: 'gemini-session' });
 });
 
+test('clearContext resets worker session and resets chat transcript to a single system notice', async () => {
+  const { engine, adapters } = setup({ settings: { autoStart: true } });
+  const tab = await engine.createTab('C:/proj', 't');
+  await engine.submit(tab.id, 'start', { kind: 'auto' });
+  await waitFor(engine, tab.id, ['idle']);
+  expect(tab.transcript.length).toBeGreaterThan(1);
+  expect(tab.worker?.sessionId).toBe('gemini-session');
+  expect(tab.vote).not.toBeNull();
+
+  const cleared = await engine.clearContext(tab.id);
+  expect(cleared.status).toBe('drafting');
+  expect(cleared.worker).toBeNull();
+  expect(cleared.tier).toBeNull();
+  expect(cleared.transcript.length).toBe(1);
+  expect(cleared.transcript[0]?.kind).toBe('system');
+  expect(cleared.transcript[0]?.text).toContain('Context cleared');
+  expect(cleared.vote).toBeNull();
+  expect(cleared.routing).toBeNull();
+
+  // Next message in auto mode triggers council vote again
+  await engine.submit(tab.id, 'brand new task', { kind: 'auto' });
+  await waitFor(engine, tab.id, ['idle']);
+  expect(tab.vote).not.toBeNull();
+  const voteCalls = adapters.gemini.calls.filter((c) => c.purpose === 'vote');
+  expect(voteCalls.length).toBe(2);
+});
+
 test('closing a running tab aborts the worker and applies no further events', async () => {
   const slow = new FakeAdapter('gemini', (opts: RunOptions) =>
     opts.purpose === 'vote' ? { events: voteEvents('easy') } : { events: workEvents(), delayMs: 150 },
@@ -233,6 +258,28 @@ test('closing a running tab aborts the worker and applies no further events', as
   await new Promise((r) => setTimeout(r, 500));
   expect(engine.getTab(tab.id)?.transcript.length).toBe(count);
   expect(engine.getTab(tab.id)?.status).toBe('closed');
+});
+
+test('closing a tab mid-vote stops the seats instead of letting them finish and bill', async () => {
+  const slowVote = (provider: 'claude' | 'codex' | 'gemini') =>
+    new FakeAdapter(provider, (opts: RunOptions) =>
+      opts.purpose === 'vote' ? { events: voteEvents('easy'), delayMs: 2_000 } : { events: workEvents() },
+    );
+  const seats = { gemini: slowVote('gemini'), codex: slowVote('codex'), claude: slowVote('claude') };
+  const { engine, ledgerFile } = setup({ adapters: seats });
+  const tab = await engine.createTab('C:/proj', 't');
+  await engine.submit(tab.id, 'go', { kind: 'auto' });
+  await waitFor(engine, tab.id, ['voting']);
+  for (let i = 0; i < 50 && !seats.gemini.calls.some((c) => c.purpose === 'vote'); i++) await new Promise((r) => setTimeout(r, 20));
+
+  const started = Date.now();
+  const closed = await engine.close(tab.id);
+  expect(closed.status).toBe('closed');
+  expect(Date.now() - started).toBeLessThan(1_500);
+  for (const seat of Object.values(seats)) {
+    expect(seat.calls.find((c) => c.purpose === 'vote')?.signal?.aborted).toBe(true);
+  }
+  expect(await readEntries(ledgerFile)).toEqual([]);
 });
 
 test('workers run in the project checkout itself; tabs carry no worktree', async () => {
@@ -264,10 +311,8 @@ test('an unavailable provider drops out of the council and its tier is served by
   await engine.submit(tab.id, 'tiny change', { kind: 'auto' });
   const voted = await waitFor(engine, tab.id, ['awaiting-start']);
   expect(voted.vote?.seats.map((s) => s.seat.provider)).toEqual(['codex', 'claude']);
-  expect(voted.vote?.decision).toBe('easy');
-  expect(voted.tier).toBe('easy');
+  expect(voted.vote?.selectedSeat.provider).toBe('codex');
   expect(voted.worker).toMatchObject({ provider: 'codex', model: 'gpt-5.1-codex-mini' });
-  expect(voted.routing?.shiftedFrom).toBeUndefined();
   expect(voted.routing?.notes?.join(' ')).toMatch(/gemini/i);
 });
 
@@ -279,9 +324,8 @@ test('an exhausted budget still shifts the tier even when every CLI is set up', 
   const tab = await engine.createTab('C:/proj', 't');
   await engine.submit(tab.id, 'tiny change', { kind: 'auto' });
   const voted = await waitFor(engine, tab.id, ['awaiting-start']);
-  expect(voted.vote?.decision).toBe('easy');
-  expect(voted.tier).toBe('medium');
-  expect(voted.routing).toMatchObject({ shiftedFrom: 'easy', reason: expect.stringContaining('gemini') });
+  expect(voted.worker).toMatchObject({ provider: 'codex' });
+  expect(voted.routing?.reason).toMatch(/gemini/i);
 });
 
 test('a worker that exits 0 but reports failure in-band still fails the tab and is ledgered', async () => {
@@ -346,22 +390,19 @@ test('usage windows reported by a CLI are kept per provider and exposed with the
   expect(b.gemini.usage).toBeUndefined();
 });
 
-test('with only Claude set up, the council is Haiku alone and escalation climbs Claude models', async () => {
+test('with only Claude set up, the council climbs Claude models on escalation', async () => {
   const claude = scripted('claude', 'easy');
   const { engine } = setup({ health: { gemini: false, codex: false }, adapters: { claude } });
-  expect(engine.routing()).toMatchObject({ available: ['claude'], seats: [{ provider: 'claude', model: 'claude-haiku-5-5' }] });
+  expect(engine.routing()).toMatchObject({ available: ['claude'] });
   const tab = await engine.createTab('C:/proj', 't');
   await engine.submit(tab.id, 'small thing', { kind: 'auto' });
   const voted = await waitFor(engine, tab.id, ['awaiting-start']);
-  expect(voted.vote?.seats.map((s) => s.seat)).toEqual([{ provider: 'claude', model: 'claude-haiku-5-5' }]);
   expect(voted.worker).toMatchObject({ provider: 'claude', model: 'claude-haiku-5-5' });
-  expect(voted.tier).toBe('easy');
   expect(voted.routing?.notes?.join(' ')).toMatch(/only claude/i);
   await engine.start(tab.id);
   await waitFor(engine, tab.id, ['idle']);
   await engine.escalate(tab.id);
   const escalated = await waitFor(engine, tab.id, ['idle']);
-  expect(escalated.tier).toBe('medium');
   expect(escalated.worker).toMatchObject({ provider: 'claude', model: 'claude-sonnet-5-5' });
   const calls = claude.calls.filter((c) => c.purpose === 'work');
   expect(calls.map((c) => c.model)).toEqual(['claude-haiku-5-5', 'claude-sonnet-5-5']);

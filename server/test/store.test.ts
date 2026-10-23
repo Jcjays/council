@@ -25,7 +25,6 @@ test('newTab starts drafting with empty transcript and the project identity', ()
     projectRoot: 'C:/p',
     title: 'Fix login',
     status: 'drafting',
-    tier: null,
     worker: null,
     previousWorkers: [],
     vote: null,

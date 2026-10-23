@@ -3,12 +3,15 @@ import http from 'node:http';
 import path from 'node:path';
 import type { WebSocketServer } from 'ws';
 import { PROVIDERS, type CliHealth, type Provider } from './adapters/types.js';
+import { detectedBudgets, detectedModels } from './config/detect.js';
 import type { SettingsStore } from './config/settings.js';
 import type { PricingStore, PriceTable } from './ledger/pricing.js';
-import { isAllowedOrigin } from './origin.js';
+import { isAllowedHost, isAllowedOrigin } from './origin.js';
 import type { SubmitMode, TaskEngine } from './tasks/engine.js';
 import { defaultBranch, runGit } from './worktrees/git.js';
 import { attachWebSocket } from './ws.js';
+import { findPlans, findSkills } from './discovery/plans.js';
+import { browseDirectory, discoverProjects, pickNativeFolder } from './discovery/projects.js';
 
 export interface ServerDeps {
   engine: TaskEngine;
@@ -106,8 +109,20 @@ export function createServer(deps: ServerDeps): CouncilServer {
     if (resource === 'health' && method === 'GET') return { status: 200, body: await deps.health() };
 
     if (resource === 'settings') {
+      if (id === 'detect-models' && method === 'POST') {
+        const update = detectedModels(deps.settings.get(), await deps.health());
+        return { status: 200, body: await deps.settings.update(update) };
+      }
+      if (id === 'detect-budgets' && method === 'POST') {
+        const update = detectedBudgets(deps.settings.get(), await deps.health());
+        return { status: 200, body: await deps.settings.update(update) };
+      }
       if (method === 'GET') return { status: 200, body: deps.settings.get() };
-      if (method === 'PUT') return { status: 200, body: await deps.settings.update(body) };
+      if (method === 'PUT') {
+        // `recentProjects` has its own endpoint; a settings form holding a stale copy must not shorten the list.
+        const { recentProjects: _ignored, ...editable } = body;
+        return { status: 200, body: await deps.settings.update(editable) };
+      }
     }
 
     if (resource === 'pricing') {
@@ -117,11 +132,34 @@ export function createServer(deps: ServerDeps): CouncilServer {
 
     if (resource === 'budgets' && method === 'GET') return { status: 200, body: await engine.budgets() };
 
+    if (resource === 'plans' && method === 'GET') {
+      const projectId = url.searchParams.get('projectId');
+      let root = process.cwd();
+      if (projectId) {
+        const found = deps.settings.get().recentProjects.find((r) => engine.projectIdFor(r) === projectId);
+        if (found) root = found;
+      }
+      const [plans, skills] = await Promise.all([findPlans(root), findSkills(root)]);
+      return { status: 200, body: { plans, skills } };
+    }
+
     if (resource === 'routing' && method === 'GET') {
       return { status: 200, body: engine.routing(url.searchParams.get('projectId') ?? undefined) };
     }
 
     if (resource === 'projects') {
+      if (id === 'discover' && method === 'GET') {
+        const found = await discoverProjects();
+        return { status: 200, body: { currentCwd: process.cwd(), projects: found } };
+      }
+      if (id === 'browse' && method === 'GET') {
+        const dir = url.searchParams.get('dir') ?? undefined;
+        return { status: 200, body: await browseDirectory(dir) };
+      }
+      if (id === 'pick-native' && method === 'POST') {
+        const initial = typeof body.initial === 'string' ? body.initial : undefined;
+        return { status: 200, body: await pickNativeFolder(initial) };
+      }
       if (method === 'GET') {
         return {
           status: 200,
@@ -177,6 +215,8 @@ export function createServer(deps: ServerDeps): CouncilServer {
               };
             case 'send':
               return { status: 200, body: await engine.send(id, str(body.text, 'text')) };
+            case 'clear-context':
+              return { status: 200, body: await engine.clearContext(id) };
             case 'escalate':
               return { status: 200, body: await engine.escalate(id) };
             case 'switch':
@@ -202,7 +242,7 @@ export function createServer(deps: ServerDeps): CouncilServer {
     }
     const root = path.resolve(dist);
     let target = path.resolve(root, `.${decodeURIComponent(url.pathname)}`);
-    if (!target.startsWith(root)) target = path.join(root, 'index.html');
+    if (target !== root && !target.startsWith(root + path.sep)) target = path.join(root, 'index.html');
     let file = target;
     let stat = await fs.stat(file).catch(() => null);
     if (!stat || stat.isDirectory()) {
@@ -228,6 +268,11 @@ export function createServer(deps: ServerDeps): CouncilServer {
   const server = http.createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
     const method = req.method ?? 'GET';
+    if (!isAllowedHost(req.headers.host)) {
+      res.writeHead(403, { 'content-type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ error: 'Council only answers requests addressed to localhost' }));
+      return;
+    }
     if (url.pathname.startsWith('/api/')) {
       if (method !== 'GET' && method !== 'HEAD' && !isAllowedOrigin(req.headers.origin)) {
         res.writeHead(403, { 'content-type': 'application/json; charset=utf-8' });

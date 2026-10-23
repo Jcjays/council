@@ -18,6 +18,10 @@ export interface ProviderSums {
   spent: number;
   /** Spend whose purpose was not `work` (votes and hand-off summaries). */
   routingSpent: number;
+  inputTokens?: number;
+  cachedTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
 }
 
 export async function appendEntry(file: string, entry: LedgerEntry): Promise<void> {
@@ -84,7 +88,12 @@ export function currentPeriod(now: Date, resetDay: number): { start: Date; end: 
 
 /** Sums `[start, end)` per provider. */
 export function sumPeriod(entries: LedgerEntry[], start: Date, end: Date): Record<Provider, ProviderSums> {
-  const sums = Object.fromEntries(PROVIDERS.map((p) => [p, { spent: 0, routingSpent: 0 }])) as Record<Provider, ProviderSums>;
+  const sums = Object.fromEntries(
+    PROVIDERS.map((p) => [
+      p,
+      { spent: 0, routingSpent: 0, inputTokens: 0, cachedTokens: 0, outputTokens: 0, totalTokens: 0 },
+    ]),
+  ) as Record<Provider, ProviderSums>;
   for (const e of entries) {
     const t = new Date(e.ts);
     if (Number.isNaN(t.getTime()) || t < start || t >= end) continue;
@@ -92,6 +101,13 @@ export function sumPeriod(entries: LedgerEntry[], start: Date, end: Date): Recor
     if (!bucket) continue;
     bucket.spent += e.costUsd;
     if (e.purpose !== 'work') bucket.routingSpent += e.costUsd;
+    const inp = e.usage?.inputTokens ?? 0;
+    const cch = e.usage?.cachedInputTokens ?? 0;
+    const out = e.usage?.outputTokens ?? 0;
+    bucket.inputTokens = (bucket.inputTokens ?? 0) + inp;
+    bucket.cachedTokens = (bucket.cachedTokens ?? 0) + cch;
+    bucket.outputTokens = (bucket.outputTokens ?? 0) + out;
+    bucket.totalTokens = (bucket.totalTokens ?? 0) + (inp + out);
   }
   return sums;
 }

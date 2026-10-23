@@ -17,3 +17,14 @@ export function isAllowedOrigin(origin: string | undefined): boolean {
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
   return LOOPBACK_HOSTS.has(url.hostname);
 }
+
+/**
+ * The `Host` header a browser sends must name loopback too. A page on a domain
+ * whose DNS points at 127.0.0.1 counts as same-origin to the browser, so without
+ * this check it could read every GET (tabs, transcripts, folder listings).
+ */
+export function isAllowedHost(host: string | undefined): boolean {
+  if (host === undefined || host === '') return false;
+  const hostname = host.startsWith('[') ? host.slice(0, host.indexOf(']') + 1) : (host.split(':')[0] ?? '');
+  return LOOPBACK_HOSTS.has(hostname);
+}

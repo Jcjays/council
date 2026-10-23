@@ -1,5 +1,5 @@
 import type { Provider, Tier } from '../adapters/types.js';
-import type { CouncilResult } from '../council/council.js';
+import type { CouncilResult, Seat } from '../council/council.js';
 import type { TabStatus } from './state.js';
 
 export type TranscriptKind = 'user' | 'assistant' | 'tool' | 'system' | 'vote' | 'result' | 'error';
@@ -25,11 +25,13 @@ export interface Tab {
   projectRoot: string;
   title: string;
   status: TabStatus;
-  tier: Tier | null;
+  complexity?: number;
+  confidence?: number;
+  tier?: Tier | null;
   worker: TabWorker | null;
   previousWorkers: TabWorker[];
   vote: CouncilResult | null;
-  routing: { shiftedFrom?: Tier; reason?: string; notes?: string[] } | null;
+  routing: { reason?: string; notes?: string[]; isFallback?: boolean; exhaustedNotice?: string; shiftedFrom?: Seat } | null;
   transcript: TranscriptItem[];
   costUsd: number;
   fullAuto: boolean;

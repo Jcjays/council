@@ -1,17 +1,16 @@
 import { expect, test } from 'vitest';
 import { buildVotePrompt } from '../src/council/prompt.js';
 
-test('the vote prompt carries the task, the snapshot, tier definitions, the no-tools rule and the JSON shape', () => {
-  const p = buildVotePrompt('Rename foo to bar', 'Top-level: README.md, src/');
-  expect(p).toContain('Rename foo to bar');
-  expect(p).toContain('Top-level: README.md, src/');
-  expect(p).toMatch(/easy/);
-  expect(p).toMatch(/medium/);
-  expect(p).toMatch(/hard/);
-  expect(p.toLowerCase()).toContain('do not open files');
-  expect(p).toContain('"tier"');
-  expect(p).toContain('"confidence"');
-  expect(p).toContain('"reason"');
+test('prompt requests confidence and complexity and does not mention easy/medium/hard tiers', () => {
+  const prompt = buildVotePrompt('fix bug', 'tree');
+  expect(prompt).toContain('"confidence"');
+  expect(prompt).toContain('"complexity"');
+  expect(prompt).not.toContain('easy:');
+  expect(prompt).not.toContain('medium:');
+  expect(prompt).not.toContain('hard:');
+  expect(prompt.toLowerCase()).toContain('do not open files');
+  expect(prompt).toContain('"reason"');
+  expect(prompt).toContain('tree');
 });
 
 test('the task is fenced so text inside it cannot pose as instructions', () => {

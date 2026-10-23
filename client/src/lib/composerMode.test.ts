@@ -1,5 +1,12 @@
 import { expect, test } from 'vitest';
-import { followUpSelection, selectionChangesWorker } from './composerMode';
+import { DEFAULT_PERMISSION, followUpSelection, fullAutoFor, selectionChangesWorker } from './composerMode';
+
+test('a task is only full auto when the developer asked for it', () => {
+  expect(fullAutoFor(DEFAULT_PERMISSION)).toBe(false);
+  expect(fullAutoFor('restricted')).toBe(false);
+  expect(fullAutoFor('full-auto')).toBe(true);
+  expect(fullAutoFor('always')).toBe(true);
+});
 
 test('on a follow-up the selector reads as the current worker', () => {
   expect(followUpSelection({ worker: { provider: 'codex', model: 'gpt-5.5', sessionId: 's' } })).toEqual({ provider: 'codex', model: 'gpt-5.5' });

@@ -15,6 +15,7 @@ export type TabEvent =
   | 'escalate'
   | 'switch'
   | 'handoff-ready'
+  | 'clear-context'
   | 'close';
 
 export class InvalidTransition extends Error {
@@ -32,8 +33,8 @@ const TABLE: Record<TabStatus, Partial<Record<TabEvent, TabStatus>>> = {
   voting: { 'vote-done': 'awaiting-start', 'vote-done-autostart': 'running' },
   'awaiting-start': { start: 'running' },
   running: { 'worker-done': 'idle', 'worker-failed': 'failed' },
-  idle: { message: 'running', escalate: 'handing-off', switch: 'handing-off' },
-  failed: { message: 'running', escalate: 'handing-off', switch: 'handing-off' },
+  idle: { message: 'running', escalate: 'handing-off', switch: 'handing-off', 'clear-context': 'drafting' },
+  failed: { message: 'running', escalate: 'handing-off', switch: 'handing-off', 'clear-context': 'drafting' },
   'handing-off': { 'handoff-ready': 'running' },
   closed: {},
 };
@@ -46,6 +47,6 @@ export function transition(from: TabStatus, event: TabEvent): TabStatus {
   return next;
 }
 
-export function canEscalate(tier: Tier): boolean {
-  return tier !== 'hard';
+export function canEscalate(seatIndex: number, totalSeats: number): boolean {
+  return seatIndex >= 0 && seatIndex < totalSeats - 1;
 }

@@ -1,7 +1,8 @@
-import { useState } from 'react';
 import { basename } from '../lib/format';
+import { useProjectPicker } from '../hooks/useProjectPicker';
 import { noneSetUp, type Availability } from '../lib/routing';
 import type { CliHealth, ProjectInfo, Provider } from '../types';
+import { FolderBrowser } from './FolderBrowser';
 import { Health } from './Health';
 
 interface Props {
@@ -21,12 +22,12 @@ export function Steps() {
   return (
     <div className="steps" aria-label="How a tab works">
       <div className="step">
-        <b>1 · Vote</b>
-        <span>Cheap seats rate the task easy, medium or hard.</span>
+        <b>1 · Evaluate</b>
+        <span>Council seats analyze task complexity (1–5) and self-score their confidence.</span>
       </div>
       <div className="step">
         <b>2 · Route</b>
-        <span>The cheapest worker for that tier gets it: Gemini, Codex or Claude.</span>
+        <span>The lowest-cost confident seat (≥80%) executes the task, with fallback to deep reasoning models.</span>
       </div>
       <div className="step">
         <b>3 · Review</b>
@@ -51,18 +52,8 @@ function Notes({ notes }: { notes: string[] }) {
 
 /** What the main pane shows with no tab selected: set up a CLI, get started, or jump back in. */
 export function Home({ projects, project, openTabs, available, notes, health, onOpenProject, onNewTab, onSettings }: Props) {
-  const [path, setPath] = useState('');
-  const [opening, setOpening] = useState(false);
-  const open = async (target: string) => {
-    if (!target.trim()) return;
-    setOpening(true);
-    try {
-      await onOpenProject(target.trim());
-      setPath('');
-    } finally {
-      setOpening(false);
-    }
-  };
+  const { path, setPath, search, setSearch, opening, browsing, setBrowsing, currentCwd, open, recent, discovered } =
+    useProjectPicker({ projects, onOpenProject });
 
   if (noneSetUp(available)) {
     return (
@@ -110,8 +101,30 @@ export function Home({ projects, project, openTabs, available, notes, health, on
         ) : (
           <>
             <h2>Get started</h2>
-            <p className="lead">Open a git checkout. Each tab puts one agent to work in it, following the project's CLAUDE.md, AGENTS.md or GEMINI.md; nothing is committed, so you review the changes as you would your own.</p>
+            <p className="lead">
+              Open a git checkout. Each tab puts one agent to work in it, following the project's CLAUDE.md, AGENTS.md or GEMINI.md; nothing is committed, so you review the changes as you would your own.
+            </p>
+
             <div className="card">
+              {/* Current workspace 1-click button */}
+              {currentCwd && (
+                <div style={{ marginBottom: '12px' }}>
+                  <button
+                    type="button"
+                    className="primary"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}
+                    onClick={() => void open(currentCwd)}
+                    disabled={opening}
+                  >
+                    <span>🚀</span>
+                    <span>Open Current Workspace: <strong>{basename(currentCwd)}</strong></span>
+                  </button>
+                  <span className="muted xs mono" style={{ display: 'block', marginTop: '4px' }}>
+                    {currentCwd}
+                  </span>
+                </div>
+              )}
+
               <form
                 className="row"
                 onSubmit={(e) => {
@@ -119,15 +132,42 @@ export function Home({ projects, project, openTabs, available, notes, health, on
                   void open(path);
                 }}
               >
-                <input value={path} onChange={(e) => setPath(e.target.value)} placeholder="C:\path\to\checkout" aria-label="Project path" autoFocus />
+                <input
+                  value={path}
+                  onChange={(e) => setPath(e.target.value)}
+                  placeholder="C:\path\to\checkout"
+                  aria-label="Project path"
+                  autoFocus
+                  style={{ flex: 1 }}
+                />
                 <button type="submit" className="primary" disabled={opening || !path.trim()}>
                   Open
                 </button>
+                <button
+                  type="button"
+                  className="quiet"
+                  onClick={() => setBrowsing(true)}
+                  disabled={opening}
+                  title="Browse folders and Git repositories"
+                >
+                  📁 Browse Folders
+                </button>
               </form>
-              {projects.length > 0 && (
+
+              {(projects.length > 3 || discovered.length > 0 || search) && (
+                <input
+                  type="text"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search recent or discovered projects…"
+                  style={{ fontSize: 'var(--fs-xs)', marginTop: '8px' }}
+                />
+              )}
+
+              {recent.length > 0 && (
                 <div className="recent" aria-label="Recent projects">
-                  <span className="section-label">Recent</span>
-                  {projects.map((pr) => (
+                  <span className="section-label">Recent Projects</span>
+                  {recent.map((pr) => (
                     <button key={pr.projectId} onClick={() => void open(pr.root)} disabled={opening}>
                       <span className="rrow">
                         <span>{basename(pr.root)}</span>
@@ -138,12 +178,42 @@ export function Home({ projects, project, openTabs, available, notes, health, on
                   ))}
                 </div>
               )}
+
+              {discovered.length > 0 && (
+                <div className="recent" aria-label="Discovered projects" style={{ marginTop: '12px' }}>
+                  <span className="section-label">Discovered Repositories</span>
+                  {discovered.map((pr) => (
+                    <button key={pr.root} onClick={() => void open(pr.root)} disabled={opening}>
+                      <span className="rrow">
+                        <span>{pr.name}</span>
+                        {pr.defaultBranch && <span className="muted xs">{pr.defaultBranch}</span>}
+                      </span>
+                      <span className="path">{pr.root}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {search && recent.length === 0 && discovered.length === 0 && (
+                <div className="muted sm" style={{ padding: '16px 0', textAlign: 'center' }}>
+                  No matching repositories found.
+                </div>
+              )}
             </div>
+
             <Steps />
             <Notes notes={notes} />
           </>
         )}
       </div>
+
+      {browsing && (
+        <FolderBrowser
+          initialDir={currentCwd || project?.root}
+          onSelect={(selected) => void open(selected)}
+          onClose={() => setBrowsing(false)}
+        />
+      )}
     </main>
   );
 }

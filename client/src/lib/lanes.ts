@@ -94,8 +94,11 @@ export interface Chip {
 export function tabChips(tab: Pick<Tab, 'status' | 'stalled' | 'fullAuto' | 'routing' | 'escalations'>): Chip[] {
   const chips: Chip[] = [];
   if (tab.stalled && tab.status === 'running') chips.push({ label: 'stalled', tone: 'warn', title: 'No output for a while; the worker may be stuck' });
-  if (tab.routing?.shiftedFrom) chips.push({ label: 'rerouted', tone: 'warn', title: tab.routing.reason ?? `Routed away from the ${tab.routing.shiftedFrom} tier` });
-  if (tab.escalations > 0) chips.push({ label: tab.escalations === 1 ? 'escalated' : `escalated ×${tab.escalations}`, tone: 'accent', title: 'Handed up a tier after a failure' });
+  if (tab.routing?.shiftedFrom) {
+    const fromLabel = typeof tab.routing.shiftedFrom === 'string' ? tab.routing.shiftedFrom : tab.routing.shiftedFrom.provider;
+    chips.push({ label: 'rerouted', tone: 'warn', title: tab.routing.reason ?? `Routed away from ${fromLabel}` });
+  }
+  if (tab.escalations > 0) chips.push({ label: tab.escalations === 1 ? 'escalated' : `escalated ×${tab.escalations}`, tone: 'accent', title: 'Handed up to stronger model after failure' });
   if (tab.fullAuto) chips.push({ label: 'full auto', tone: 'danger', title: 'Runs without the command allow-list' });
   return chips;
 }
