@@ -53,8 +53,8 @@ test('invalid transitions throw InvalidTransition', () => {
   expect(() => transition('drafting', 'escalate')).toThrow(/drafting.*escalate/);
 });
 
-test('canEscalate is false only at the top tier', () => {
-  expect(canEscalate('easy')).toBe(true);
-  expect(canEscalate('medium')).toBe(true);
-  expect(canEscalate('hard')).toBe(false);
+test('canEscalate is true until the highest ranked seat', () => {
+  expect(canEscalate(0, 3)).toBe(true);
+  expect(canEscalate(1, 3)).toBe(true);
+  expect(canEscalate(2, 3)).toBe(false);
 });

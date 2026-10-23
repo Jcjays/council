@@ -11,7 +11,7 @@ import { costFor, lookupPrice, type PriceTable } from '../ledger/pricing.js';
 import { diffStat as gitDiffStat } from '../worktrees/git.js';
 import { clipText, clipValue } from './clip.js';
 import { buildHandoffPrompt, buildSummaryPrompt, mechanicalSummary } from './handoff.js';
-import { canEscalate, transition, type TabStatus } from './state.js';
+import { transition, type TabStatus } from './state.js';
 import { newId, newTab, type TabStore } from './store.js';
 import type { Tab, TabWorker, TranscriptItem, TranscriptKind } from './types.js';
 
@@ -214,7 +214,7 @@ export class TaskEngine extends EventEmitter {
     this.require(tab, ['idle', 'failed']);
     const eff = this.routing(tab.projectId);
     if (!tab.worker || !nextStrongerSeat(tab.worker, eff.seats, this.deps.pricing())) {
-      throw new Error('this tab is already at the top tier');
+      throw new Error('no stronger council seat available to escalate to');
     }
     const from = await this.prepareHandoff(tab, 'escalate');
     this.spawn(tab, () => this.finishHandoff(tab, from, 'escalate'));
@@ -421,6 +421,7 @@ export class TaskEngine extends EventEmitter {
       reason: result.reason,
       notes: eff.notes,
       isFallback: result.isFallback,
+      shiftedFrom: result.shiftedFrom,
       exhaustedNotice: result.exhaustedNotice,
     };
     this.addItem(tab, 'vote', undefined, { council: result, routing: tab.routing, notes: eff.notes });

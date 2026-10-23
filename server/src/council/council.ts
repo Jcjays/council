@@ -27,6 +27,7 @@ export interface CouncilResult {
   complexity: number;
   reason: string;
   isFallback: boolean;
+  shiftedFrom?: Seat;
   exhaustedNotice?: string;
 }
 
@@ -142,6 +143,7 @@ export async function runCouncil(a: CouncilArgs): Promise<CouncilResult> {
     complexity: decision.complexity,
     reason: decision.reason,
     isFallback: decision.isFallback,
+    shiftedFrom: decision.shiftedFrom,
     exhaustedNotice: decision.exhaustedNotice,
   };
 }

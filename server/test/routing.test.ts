@@ -98,3 +98,21 @@ test('nextStrongerSeat steps up to next seat in ranking', () => {
   expect(highest).toEqual(ranked[2]);
   expect(nextStrongerSeat(highest as Seat, seats, DEFAULT_PRICING)).toBeNull();
 });
+
+test('nextStrongerSeat finds stronger seat when current model was manually chosen outside seats', () => {
+  // A cheap manual model should escalate to the next seat with higher cost
+  const cheapManual: Seat = { provider: 'gemini', model: 'flash-lite' };
+  const stronger = nextStrongerSeat(cheapManual, [
+    { provider: 'codex', model: 'gpt-5.1-codex-mini' },
+    { provider: 'claude', model: 'claude-sonnet-5-5' },
+  ], DEFAULT_PRICING);
+  expect(stronger).toEqual({ provider: 'codex', model: 'gpt-5.1-codex-mini' });
+
+  // An unlisted model already at or above top seat returns null
+  const topManual: Seat = { provider: 'claude', model: 'claude-opus-5-5' };
+  const none = nextStrongerSeat(topManual, [
+    { provider: 'gemini', model: 'flash-lite' },
+    { provider: 'codex', model: 'gpt-5.1-codex-mini' },
+  ], DEFAULT_PRICING);
+  expect(none).toBeNull();
+});

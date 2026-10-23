@@ -132,11 +132,10 @@ export function nextStrongerSeat(current: Seat, seats: Seat[], pricing: PriceTab
   const ranked = rankSeats(seats, pricing);
   const curKey = `${current.provider}:${current.model ?? ''}`;
   const idx = ranked.findIndex((s) => `${s.provider}:${s.model ?? ''}` === curKey);
-  if (idx < 0) {
-    return ranked[0] ?? null;
+  if (idx >= 0) {
+    return idx + 1 < ranked.length ? (ranked[idx + 1] as Seat) : null;
   }
-  if (idx + 1 < ranked.length) {
-    return ranked[idx + 1] as Seat;
-  }
-  return null;
+  const curCost = seatCost(current, pricing);
+  const stronger = ranked.find((s) => seatCost(s, pricing) > curCost);
+  return stronger ?? null;
 }
