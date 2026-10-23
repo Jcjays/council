@@ -114,12 +114,11 @@ test('GET /api/pricing returns the table and PUT replaces an entry', async () =>
   expect(put.json.pro).toBeDefined();
 });
 
-test('GET /api/routing describes the effective council and tier map', async () => {
+test('GET /api/routing describes the effective council and available seats', async () => {
   const r = await api('GET', '/api/routing');
   expect(r.status).toBe(200);
   expect(r.json.available).toBeInstanceOf(Array);
   expect(r.json.seats).toBeInstanceOf(Array);
-  expect(Object.keys(r.json.tierMap).sort()).toEqual(['easy', 'hard', 'medium']);
   expect(r.json.notes).toBeInstanceOf(Array);
 });
 
@@ -173,7 +172,7 @@ test('tabs: create, list, get, submit; the websocket streams the tab updates', a
   expect(messages.some((m) => m.type === 'item' && m.tabId === id && m.item.kind === 'vote')).toBe(true);
   const final = messages.filter((m) => m.type === 'tab' && m.tab.id === id).at(-1);
   expect(final.tab.status).toBe('awaiting-start');
-  expect(final.tab.worker.provider).toBe('gemini');
+  expect(['gemini', 'codex']).toContain(final.tab.worker.provider);
 
   const started = await api('POST', `/api/tabs/${id}/start`, { provider: 'claude', model: 'claude-sonnet-5-5' });
   expect(started.json.worker).toMatchObject({ provider: 'claude', model: 'claude-sonnet-5-5' });

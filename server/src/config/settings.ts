@@ -1,8 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { MODEL_LADDERS, PROVIDERS, TIER_ORDER, type Provider } from '../adapters/types.js';
+import { MODEL_LADDERS, PROVIDERS, type Provider } from '../adapters/types.js';
 import type { Seat } from '../council/council.js';
-import type { TierMap } from '../council/routing.js';
 
 export type ProjectOverride = Partial<Pick<Settings, 'allowedCommands' | 'autoStart' | 'autoEscalate'>>;
 
@@ -12,7 +11,6 @@ export interface Settings {
   warnPct: number;
   resetDay: number;
   seats: Seat[];
-  tierMap: TierMap;
   autoStart: boolean;
   autoEscalate: boolean;
   stallMinutes: number;
@@ -35,11 +33,6 @@ export const DEFAULT_SETTINGS: Settings = {
     { provider: 'codex', model: 'gpt-5.1-codex-mini' },
     { provider: 'claude', model: 'claude-haiku-5-5' },
   ],
-  tierMap: {
-    easy: { provider: 'gemini', model: 'flash' },
-    medium: { provider: 'codex', model: null },
-    hard: { provider: 'claude', model: 'claude-sonnet-5-5' },
-  },
   autoStart: false,
   autoEscalate: true,
   stallMinutes: 10,
@@ -144,15 +137,6 @@ function cleanValue(key: string, value: unknown, current: unknown): unknown {
       for (const p of PROVIDERS) {
         const list = stringArray(value[p]);
         if (list) out[p] = list;
-      }
-      return out;
-    }
-    case 'tierMap': {
-      if (!isObject(value)) return undefined;
-      const out = { ...(current as TierMap) };
-      for (const t of TIER_ORDER) {
-        const w = value[t];
-        if (isWorker(w)) out[t] = worker(w);
       }
       return out;
     }
