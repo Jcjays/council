@@ -22,12 +22,12 @@ export function Steps() {
   return (
     <div className="steps" aria-label="How a tab works">
       <div className="step">
-        <b>1 · Vote</b>
-        <span>Council classifies task complexity (easy, medium, or hard). Rating certainty reflects how clearly specified the task is.</span>
+        <b>1 · Evaluate</b>
+        <span>Council seats analyze task complexity (1–5) and self-score their confidence.</span>
       </div>
       <div className="step">
         <b>2 · Route</b>
-        <span>The cheapest capable worker for that tier gets it: Gemini, Codex or Claude.</span>
+        <span>The lowest-cost confident seat (≥80%) executes the task, with fallback to deep reasoning models.</span>
       </div>
       <div className="step">
         <b>3 · Review</b>

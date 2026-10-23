@@ -94,7 +94,7 @@ export function TabView({ tab, settings, available, stallSeq, details, onToggleD
           </div>
           <div className="tab-actions">
             {canEscalate && (
-              <button className="quiet" disabled={busy} onClick={() => void act(() => api.escalate(tab.id))} title="Hand the task to the next tier up with a summary">
+              <button className="quiet" disabled={busy} onClick={() => void act(() => api.escalate(tab.id))} title="Hand the task to a stronger model with a summary">
                 Escalate
               </button>
             )}

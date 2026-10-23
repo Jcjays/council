@@ -212,7 +212,11 @@ export function VoteCard({ tab, settings, available, onStart }: Props) {
 
           {(tab.routing?.reason || notes.length > 0) && (
             <div className="notes" aria-label="Routing notes">
-              {tab.routing?.reason && <div className="note-row warn-text">{tab.routing.reason}</div>}
+              {tab.routing?.reason && (
+                <div className={`note-row${tab.routing.isFallback || tab.routing.shiftedFrom || tab.routing.exhaustedNotice ? ' warn-text' : ''}`}>
+                  {tab.routing.reason}
+                </div>
+              )}
               {notes.map((n) => (
                 <div key={n} className="note-row">
                   {n}
