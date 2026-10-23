@@ -1,31 +1,30 @@
-import { TIER_ORDER, type Tier } from '../adapters/types.js';
-
 export const VOTE_JSON_SCHEMA: Record<string, unknown> = {
   type: 'object',
   properties: {
-    tier: { type: 'string', enum: ['easy', 'medium', 'hard'] },
     confidence: { type: 'number', minimum: 0, maximum: 1 },
+    complexity: { type: 'integer', minimum: 1, maximum: 5 },
     reason: { type: 'string' },
   },
-  required: ['tier', 'confidence', 'reason'],
+  required: ['confidence', 'complexity', 'reason'],
   additionalProperties: false,
 };
 
 export interface Vote {
-  tier: Tier;
   confidence: number;
+  complexity: number;
   reason: string;
 }
 
 function toVote(value: unknown): Vote | null {
   if (!value || typeof value !== 'object') return null;
   const v = value as Record<string, unknown>;
-  const tier = v.tier;
-  if (typeof tier !== 'string' || !(TIER_ORDER as readonly string[]).includes(tier)) return null;
-  const raw = typeof v.confidence === 'number' && Number.isFinite(v.confidence) ? v.confidence : 0.5;
+  if (typeof v.confidence !== 'number' || !Number.isFinite(v.confidence)) return null;
+  if (typeof v.complexity !== 'number' || !Number.isFinite(v.complexity)) return null;
+  const rawConfidence = v.confidence;
+  const rawComplexity = Math.round(v.complexity);
   return {
-    tier: tier as Tier,
-    confidence: Math.min(1, Math.max(0, raw)),
+    confidence: Math.min(1, Math.max(0, rawConfidence)),
+    complexity: Math.min(5, Math.max(1, rawComplexity)),
     reason: typeof v.reason === 'string' ? v.reason : '',
   };
 }
