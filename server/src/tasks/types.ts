@@ -25,11 +25,13 @@ export interface Tab {
   projectRoot: string;
   title: string;
   status: TabStatus;
-  tier: Tier | null;
+  complexity?: number;
+  confidence?: number;
+  tier?: Tier | null;
   worker: TabWorker | null;
   previousWorkers: TabWorker[];
   vote: CouncilResult | null;
-  routing: { shiftedFrom?: Tier; reason?: string; notes?: string[] } | null;
+  routing: { reason?: string; notes?: string[]; isFallback?: boolean; exhaustedNotice?: string; shiftedFrom?: any } | null;
   transcript: TranscriptItem[];
   costUsd: number;
   fullAuto: boolean;

@@ -9,9 +9,14 @@ test('all providers available: configured seats are used as they are', () => {
   expect(r.notes).toEqual([]);
 });
 
-test('only Claude: configured Claude seat is kept and note explains', () => {
+test('only Claude: council climbs its model ladder and note explains', () => {
   const r = effectiveRouting(DEFAULT_SETTINGS, ['claude']);
-  expect(r.seats).toEqual([{ provider: 'claude', model: 'claude-haiku-5-5' }]);
+  expect(r.seats.map((s) => s.model)).toEqual([
+    'claude-haiku-5-5',
+    'claude-sonnet-5-5',
+    'claude-opus-5-5',
+    'claude-fable-5-1',
+  ]);
   expect(r.notes.join(' ')).toMatch(/only claude/i);
 });
 
@@ -33,5 +38,5 @@ test('no provider: no seats, and the note says what to set up', () => {
 
 test('configured seats that are all unavailable fall back to the cheapest model of an available provider', () => {
   const r = effectiveRouting({ ...DEFAULT_SETTINGS, seats: [{ provider: 'codex', model: 'gpt-5.1-codex-mini' }] }, ['gemini']);
-  expect(r.seats).toEqual([{ provider: 'gemini', model: 'flash-lite' }]);
+  expect(r.seats.map((s) => s.model)).toEqual(['flash-lite', 'flash', 'pro']);
 });

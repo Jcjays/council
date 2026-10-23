@@ -1,16 +1,11 @@
-import type { Provider, Tier } from '../adapters/types.js';
+import { MODEL_LADDERS, type Provider, type Tier } from '../adapters/types.js';
 import type { BudgetState } from '../ledger/budget.js';
 import { lookupPrice, type PriceTable } from '../ledger/pricing.js';
 import type { Seat, SeatResult } from './council.js';
 import { consensusComplexity } from './tally.js';
 
-// Transitional type exports for downstream modules until Tasks 3 & 4 refactor them
 export type Worker = Seat;
 export type TierMap = Record<Tier, Worker>;
-export function route(tier: any, map: any, budgets: any, unavailable: any = []): any {
-  const target = map?.[tier] ?? { provider: 'gemini', model: null };
-  return { tier, provider: target.provider, model: target.model };
-}
 
 const PROVIDER_ORDER: Record<Provider, number> = { gemini: 1, codex: 2, claude: 3 };
 
@@ -30,6 +25,10 @@ export function rankSeats(seats: Seat[], pricing: PriceTable): Seat[] {
     const pA = PROVIDER_ORDER[a.provider] ?? 2;
     const pB = PROVIDER_ORDER[b.provider] ?? 2;
     if (pA !== pB) return pA - pB;
+    const ladder = MODEL_LADDERS[a.provider] ?? [];
+    const idxA = a.model ? ladder.indexOf(a.model) : -1;
+    const idxB = b.model ? ladder.indexOf(b.model) : -1;
+    if (idxA !== -1 && idxB !== -1 && idxA !== idxB) return idxA - idxB;
     return (a.model ?? '').localeCompare(b.model ?? '');
   });
 }
@@ -83,15 +82,25 @@ export function selectSeat(
     return res?.vote && res.vote.confidence >= 0.8;
   });
 
+  const cheapestSeat = ranked[0];
+
   if (confident.length > 0) {
     const winner = confident[0] as Seat;
     const res = getResult(winner);
+    const shiftedFrom =
+      cheapestSeat && isBlocked(cheapestSeat.provider) && winner.provider !== cheapestSeat.provider
+        ? cheapestSeat
+        : undefined;
+    const reason = shiftedFrom
+      ? `${why(shiftedFrom.provider)}; routed to ${winner.provider}`
+      : res?.vote?.reason || 'Selected lowest-cost confident model';
     return {
       selectedSeat: winner,
       confidence: res?.vote?.confidence ?? 0.8,
       complexity,
-      reason: res?.vote?.reason || 'Selected lowest-cost confident model',
+      reason,
       isFallback: false,
+      shiftedFrom,
     };
   }
 

@@ -47,6 +47,10 @@ export function transition(from: TabStatus, event: TabEvent): TabStatus {
   return next;
 }
 
-export function canEscalate(tier: Tier): boolean {
-  return tier !== 'hard';
+export function canEscalate(current: any, totalOrSeats?: any): boolean {
+  if (typeof current === 'string') return current !== 'hard';
+  if (typeof current === 'number' && typeof totalOrSeats === 'number') {
+    return current >= 0 && current < totalOrSeats - 1;
+  }
+  return true;
 }

@@ -28,8 +28,6 @@ export interface CouncilResult {
   reason: string;
   isFallback: boolean;
   exhaustedNotice?: string;
-  /** Transitional property until Task 4 updates engine */
-  decision?: any;
 }
 
 export interface CouncilArgs {
@@ -43,6 +41,8 @@ export interface CouncilArgs {
   /** Called when a seat's CLI reports the account's usage windows. */
   onQuota?: (provider: Provider, windows: QuotaWindow[]) => void;
   pricing: PriceTable;
+  budgets?: Partial<Record<Provider, any>>;
+  unavailable?: Provider[];
   timeoutMs?: number;
   costCeiling?: number;
   /** Cancels every seat, e.g. because the tab was closed mid-vote. */
@@ -134,7 +134,7 @@ async function runSeat(seat: Seat, a: CouncilArgs, prompt: string): Promise<Seat
 export async function runCouncil(a: CouncilArgs): Promise<CouncilResult> {
   const prompt = buildVotePrompt(a.task, a.snapshot);
   const seats = await Promise.all(a.seats.map((seat) => runSeat(seat, a, prompt)));
-  const decision = selectSeat(seats, a.pricing);
+  const decision = selectSeat(seats, a.pricing, a.budgets, a.unavailable);
   return {
     seats,
     selectedSeat: decision.selectedSeat,
@@ -143,6 +143,5 @@ export async function runCouncil(a: CouncilArgs): Promise<CouncilResult> {
     reason: decision.reason,
     isFallback: decision.isFallback,
     exhaustedNotice: decision.exhaustedNotice,
-    decision: 'medium',
   };
 }

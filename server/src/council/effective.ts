@@ -12,8 +12,6 @@ export interface EffectiveRouting {
   seats: Seat[];
   /** Plain-language explanation of any substitution, for the vote card and settings page. */
   notes: string[];
-  /** Transitional property until Task 4 refactors engine */
-  tierMap?: any;
 }
 
 function label(w: Seat): string {
@@ -31,7 +29,6 @@ export function effectiveRouting(settings: Pick<Settings, 'seats' | 'models'>, a
       available,
       seats: [],
       notes: ['No CLI is installed and signed in. Install Claude Code, Codex CLI or Gemini CLI, sign in, and Council will route tasks to it.'],
-      tierMap: {},
     };
   }
 
@@ -55,14 +52,12 @@ export function effectiveRouting(settings: Pick<Settings, 'seats' | 'models'>, a
 
   if (available.length === 1) {
     const only = available[0] as Provider;
+    const l = ladder(only);
+    if (l.length > 1) {
+      seats = l.map((m) => ({ provider: only, model: m }));
+    }
     notes.push(`Only ${NAMES[only]} is set up. Active council: ${seats.map(label).join(', ')}.`);
   }
 
-  const tierMap = {
-    easy: seats[0] ?? { provider: cheapest, model: null },
-    medium: seats[1] ?? seats[0] ?? { provider: cheapest, model: null },
-    hard: seats[seats.length - 1] ?? { provider: cheapest, model: null },
-  };
-
-  return { available, seats, notes, tierMap };
+  return { available, seats, notes };
 }

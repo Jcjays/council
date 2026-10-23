@@ -1,9 +1,9 @@
 import { EventEmitter } from 'node:events';
-import { PROVIDERS, TIER_ORDER, type Adapter, type CliHealth, type Provider, type QuotaWindow, type ResultEvent, type Tier } from '../adapters/types.js';
+import { PROVIDERS, type Adapter, type CliHealth, type Provider, type QuotaWindow, type ResultEvent } from '../adapters/types.js';
 import { effectiveSettings, type Settings } from '../config/settings.js';
 import { runCouncil, type Seat } from '../council/council.js';
 import { effectiveRouting, type EffectiveRouting } from '../council/effective.js';
-import { route } from '../council/routing.js';
+import { nextStrongerSeat } from '../council/routing.js';
 import { repoSnapshot } from '../council/snapshot.js';
 import { budgetState, type BudgetState, type ProviderUsage } from '../ledger/budget.js';
 import { appendEntry, currentPeriod, readEntries, sumPeriod, type LedgerEntry } from '../ledger/ledger.js';
@@ -173,7 +173,6 @@ export class TaskEngine extends EventEmitter {
 
     if (mode.kind === 'manual') {
       tab.worker = { provider: mode.provider, model: mode.model, sessionId: null };
-      tab.tier = this.tierFor(tab, mode.provider) ?? 'medium';
       tab.status = transition(tab.status, 'submit-manual');
       await this.touch(tab);
       this.spawn(tab, () => this.runWorker(tab, text));
@@ -191,7 +190,6 @@ export class TaskEngine extends EventEmitter {
     this.require(tab, ['awaiting-start']);
     if (override) {
       tab.worker = { provider: override.provider, model: override.model, sessionId: null };
-      tab.tier = this.tierFor(tab, override.provider) ?? tab.tier;
       this.addItem(tab, 'system', `Developer chose ${label(override)} instead of the council's pick.`);
     }
     tab.status = transition(tab.status, 'start');
@@ -214,7 +212,10 @@ export class TaskEngine extends EventEmitter {
   async escalate(tabId: string): Promise<Tab> {
     const tab = this.must(tabId);
     this.require(tab, ['idle', 'failed']);
-    if (!tab.tier || !canEscalate(tab.tier)) throw new Error('this tab is already at the top tier');
+    const eff = this.routing(tab.projectId);
+    if (!tab.worker || !nextStrongerSeat(tab.worker, eff.seats, this.deps.pricing())) {
+      throw new Error('this tab is already at the top tier');
+    }
     const from = await this.prepareHandoff(tab, 'escalate');
     this.spawn(tab, () => this.finishHandoff(tab, from, 'escalate'));
     return tab;
@@ -252,6 +253,8 @@ export class TaskEngine extends EventEmitter {
     tab.worker = null;
     tab.previousWorkers = [];
     tab.tier = null;
+    tab.complexity = undefined;
+    tab.confidence = undefined;
     tab.vote = null;
     tab.routing = null;
     const item: TranscriptItem = {
@@ -295,11 +298,6 @@ export class TaskEngine extends EventEmitter {
   private availableProviders(): Provider[] {
     const unavailable = this.unavailable();
     return PROVIDERS.filter((p) => !unavailable.includes(p));
-  }
-
-  private tierFor(tab: Tab, provider: Provider): Tier | null {
-    const map = this.routing(tab.projectId).tierMap;
-    return TIER_ORDER.find((t) => map[t].provider === provider) ?? null;
   }
 
   private taskText(tab: Tab): string {
@@ -394,7 +392,7 @@ export class TaskEngine extends EventEmitter {
     const eff = this.routing(tab.projectId);
     const cwd = tab.projectRoot;
     const snapshot = await (this.deps.snapshot ?? repoSnapshot)(cwd);
-    const result = await this.tracked(tab, (signal) =>
+    const result = await this.tracked(tab, async (signal) =>
       runCouncil({
         seats: eff.seats,
         adapters: this.deps.adapters,
@@ -402,6 +400,8 @@ export class TaskEngine extends EventEmitter {
         cwd,
         snapshot,
         pricing: this.deps.pricing(),
+        budgets: await this.budgets(),
+        unavailable: this.unavailable(),
         timeoutMs: s.seatTimeoutMs,
         costCeiling: s.voteCostCeiling,
         signal,
@@ -414,11 +414,16 @@ export class TaskEngine extends EventEmitter {
     if (isClosed(tab)) return;
 
     tab.vote = result;
-    const decision = route(result.decision, eff.tierMap, await this.budgets(), this.unavailable());
-    tab.tier = decision.tier;
-    tab.routing = { shiftedFrom: decision.shiftedFrom, reason: decision.reason, notes: eff.notes };
-    tab.worker = { provider: decision.provider, model: decision.model, sessionId: null };
-    this.addItem(tab, 'vote', undefined, { council: result, routing: decision, notes: eff.notes });
+    tab.complexity = result.complexity;
+    tab.confidence = result.confidence;
+    tab.worker = { provider: result.selectedSeat.provider, model: result.selectedSeat.model, sessionId: null };
+    tab.routing = {
+      reason: result.reason,
+      notes: eff.notes,
+      isFallback: result.isFallback,
+      exhaustedNotice: result.exhaustedNotice,
+    };
+    this.addItem(tab, 'vote', undefined, { council: result, routing: tab.routing, notes: eff.notes });
 
     if (s.autoStart) {
       tab.status = transition(tab.status, 'vote-done-autostart');
@@ -533,7 +538,9 @@ export class TaskEngine extends EventEmitter {
     }
 
     tab.status = transition(tab.status, 'worker-failed');
-    if (s.autoEscalate && tab.escalations === 0 && tab.tier && canEscalate(tab.tier)) {
+    const eff = this.routing(tab.projectId);
+    const canStepUp = tab.worker && nextStrongerSeat(tab.worker, eff.seats, this.deps.pricing()) !== null;
+    if (s.autoEscalate && tab.escalations === 0 && canStepUp) {
       // Go straight to handing-off; prepareHandoff announces the new state.
       const from = await this.prepareHandoff(tab, 'escalate');
       await this.finishHandoff(tab, from, 'escalate');
@@ -549,16 +556,12 @@ export class TaskEngine extends EventEmitter {
     let next: TabWorker;
 
     if (reason === 'escalate') {
-      const idx = TIER_ORDER.indexOf(tab.tier ?? 'easy');
-      const nextTier = TIER_ORDER[Math.min(idx + 1, TIER_ORDER.length - 1)] as Tier;
-      const r = route(nextTier, eff.tierMap, await this.budgets(), this.unavailable());
-      tab.tier = r.tier;
-      tab.routing = { shiftedFrom: r.shiftedFrom, reason: r.reason, notes: eff.notes };
+      const nextSeat = nextStrongerSeat(from, eff.seats, this.deps.pricing());
+      if (!nextSeat) throw new Error('no stronger council seat available to escalate to');
       tab.escalations += 1;
-      next = { provider: r.provider, model: r.model, sessionId: null };
+      next = { provider: nextSeat.provider, model: nextSeat.model, sessionId: null };
     } else {
       if (!target) throw new Error('switch needs a target worker');
-      tab.tier = this.tierFor(tab, target.provider) ?? tab.tier;
       next = { provider: target.provider, model: target.model, sessionId: null };
     }
 
@@ -572,7 +575,7 @@ export class TaskEngine extends EventEmitter {
       tab,
       'system',
       reason === 'escalate'
-        ? `Escalated from ${label(from)} to ${label(next)} (${tab.tier}).`
+        ? `Escalated from ${label(from)} to ${label(next)}.`
         : `Switched from ${label(from)} to ${label(next)}${next.sessionId ? ', resuming its earlier session' : ''}.`,
     );
     await this.touch(tab);
