@@ -1,29 +1,43 @@
 import { TIER_ORDER, type Tier } from '../adapters/types.js';
 
-export const VOTE_JSON_SCHEMA: Record<string, unknown> = {
-  type: 'object',
-  properties: {
-    tier: { type: 'string', enum: ['easy', 'medium', 'hard'] },
-    confidence: { type: 'number', minimum: 0, maximum: 1 },
-    reason: { type: 'string' },
-  },
-  required: ['tier', 'confidence', 'reason'],
-  additionalProperties: false,
-};
+/** JSON schema for one seat's answer; `modelIds` is the ladder the seat may choose from. */
+export function voteSchema(modelIds: string[]): Record<string, unknown> {
+  return {
+    type: 'object',
+    properties: {
+      model: modelIds.length > 0 ? { type: 'string', enum: modelIds } : { type: 'string' },
+      complexity: { type: 'string', enum: ['easy', 'medium', 'hard'] },
+      confidence: { type: 'number', minimum: 0, maximum: 1 },
+      reason: { type: 'string' },
+    },
+    required: ['model', 'complexity', 'confidence', 'reason'],
+    additionalProperties: false,
+  };
+}
 
 export interface Vote {
+  /** The ladder model the seat chose, or null when it named none (or one not on the ladder). */
+  model: string | null;
+  /** The seat's complexity verdict. */
   tier: Tier;
   confidence: number;
   reason: string;
 }
 
-function toVote(value: unknown): Vote | null {
+function matchModel(raw: unknown, modelIds: string[]): string | null {
+  if (typeof raw !== 'string') return null;
+  const wanted = raw.trim().toLowerCase();
+  return modelIds.find((id) => id.toLowerCase() === wanted) ?? null;
+}
+
+function toVote(value: unknown, modelIds: string[]): Vote | null {
   if (!value || typeof value !== 'object') return null;
   const v = value as Record<string, unknown>;
-  const tier = v.tier;
+  const tier = v.complexity ?? v.tier;
   if (typeof tier !== 'string' || !(TIER_ORDER as readonly string[]).includes(tier)) return null;
   const raw = typeof v.confidence === 'number' && Number.isFinite(v.confidence) ? v.confidence : 0.5;
   return {
+    model: matchModel(v.model, modelIds),
     tier: tier as Tier,
     confidence: Math.min(1, Math.max(0, raw)),
     reason: typeof v.reason === 'string' ? v.reason : '',
@@ -65,10 +79,10 @@ function* jsonCandidates(text: string): Generator<string> {
 }
 
 /** Finds a vote in raw JSON, fenced JSON, or JSON embedded in prose. */
-export function extractVote(text: string): Vote | null {
+export function extractVote(text: string, modelIds: string[] = []): Vote | null {
   for (const candidate of jsonCandidates(text)) {
     try {
-      const vote = toVote(JSON.parse(candidate));
+      const vote = toVote(JSON.parse(candidate), modelIds);
       if (vote) return vote;
     } catch {
       /* try the next candidate */

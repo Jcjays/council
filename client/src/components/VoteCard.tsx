@@ -49,13 +49,20 @@ export function VoteCard({ tab, catalog, available, onStart }: Props) {
         <span className={`tier tier-${vote.decision}`}>{vote.decision}</span>
         {!single && <span>{tally(vote)}</span>}
         {vote.tie && <span className="muted">tie broken</span>}
+        {vote.pick && (
+          <span className="row gap-sm" title={vote.pick.reason}>
+            <span className="muted">→</span>
+            <Glyph provider={vote.pick.provider} />
+            {modelLabel(catalog, vote.pick.provider, vote.pick.model)}
+          </span>
+        )}
         {!open && (
           <>
             <span className="muted">·</span>
             {vote.seats.map((s, i) => (
               <span key={i} className="row gap-sm" title={s.vote?.reason ?? s.error ?? 'no vote'}>
                 <Glyph provider={s.seat.provider} />
-                {s.vote ? `${s.vote.tier} ${Math.round(s.vote.confidence * 100)}%` : 'no vote'}
+                {s.vote ? `${s.vote.model ?? s.vote.tier} ${Math.round(s.vote.confidence * 100)}%` : 'no vote'}
               </span>
             ))}
           </>
@@ -77,6 +84,11 @@ export function VoteCard({ tab, catalog, available, onStart }: Props) {
                     {s.seat.model ?? 'default'}
                   </span>
                   <span className="grow" />
+                  {s.vote?.model && (
+                    <span className="model" title="The model this seat chose for the task">
+                      → {s.vote.model}
+                    </span>
+                  )}
                   {s.vote ? <span className={`tier tier-${s.vote.tier}`}>{s.vote.tier}</span> : <span className="tier tier-none">no vote</span>}
                 </div>
                 {s.vote && (
@@ -92,8 +104,9 @@ export function VoteCard({ tab, catalog, available, onStart }: Props) {
               </div>
             ))}
           </div>
-          {(tab.routing?.reason || notes.length > 0) && (
+          {(vote.pick?.reason || tab.routing?.reason || notes.length > 0) && (
             <div className="notes" aria-label="Routing notes">
+              {vote.pick?.reason && <div className={`note-row${vote.pick.lowConfidence ? ' warn-text' : ''}`}>{vote.pick.reason}.</div>}
               {tab.routing?.reason && <div className="note-row warn-text">{tab.routing.reason}</div>}
               {notes.map((n) => (
                 <div key={n} className="note-row">

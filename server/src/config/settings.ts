@@ -2,7 +2,6 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { Provider } from '../adapters/types.js';
 import type { Seat } from '../council/council.js';
-import type { TierMap } from '../council/routing.js';
 import { ladderIds } from './models.js';
 
 export type PermissionMode = 'ask' | 'auto';
@@ -15,7 +14,6 @@ export interface Settings {
   warnPct: number;
   resetDay: number;
   seats: Seat[];
-  tierMap: TierMap;
   autoStart: boolean;
   autoEscalate: boolean;
   stallMinutes: number;
@@ -23,7 +21,7 @@ export interface Settings {
   voteCostCeiling: number;
   /** New tabs start in this mode: `ask` prompts the developer (Claude) or keeps the CLI sandbox (Codex, Gemini); `auto` runs without either. */
   permissionMode: PermissionMode;
-  /** Model choices offered in the UI per provider. */
+  /** Each provider's models, cheapest first: the ladder the council picks from and escalation climbs. */
   models: Record<Provider, string[]>;
   recentProjects: string[];
   projectOverrides: Record<string, ProjectOverride>;
@@ -38,11 +36,6 @@ export const DEFAULT_SETTINGS: Settings = {
     { provider: 'codex', model: 'gpt-5.1-codex-mini' },
     { provider: 'claude', model: 'claude-haiku-5-5' },
   ],
-  tierMap: {
-    easy: { provider: 'gemini', model: 'flash' },
-    medium: { provider: 'codex', model: null },
-    hard: { provider: 'claude', model: 'claude-sonnet-5-5' },
-  },
   autoStart: false,
   autoEscalate: true,
   stallMinutes: 10,

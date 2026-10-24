@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { canEscalate, InvalidTransition, TAB_STATUSES, transition, type TabStatus } from '../src/tasks/state.js';
+import { InvalidTransition, TAB_STATUSES, transition, type TabStatus } from '../src/tasks/state.js';
 
 test('the happy path: vote, start, work, idle, follow-up', () => {
   let s: TabStatus = 'drafting';
@@ -47,8 +47,3 @@ test('invalid transitions throw InvalidTransition', () => {
   expect(() => transition('drafting', 'escalate')).toThrow(/drafting.*escalate/);
 });
 
-test('canEscalate is false only at the top tier', () => {
-  expect(canEscalate('easy')).toBe(true);
-  expect(canEscalate('medium')).toBe(true);
-  expect(canEscalate('hard')).toBe(false);
-});

@@ -1,7 +1,8 @@
 import { expect, test } from 'vitest';
 import type { Provider, ResultEvent } from '../src/adapters/types.js';
 import { runCouncil, type Seat } from '../src/council/council.js';
-import { VOTE_JSON_SCHEMA } from '../src/council/vote.js';
+import type { Rung } from '../src/council/ladder.js';
+import { voteSchema } from '../src/council/vote.js';
 import { costFor, DEFAULT_PRICING } from '../src/ledger/pricing.js';
 import { FakeAdapter, registry, voteEvents } from './helpers/fakeAdapter.js';
 
@@ -11,12 +12,23 @@ const seats: Seat[] = [
   { provider: 'claude', model: 'claude-haiku-5-5' },
 ];
 
+const rung = (index: number, provider: Provider, model: string): Rung => ({ index, provider, model, label: model });
+const ladder: Rung[] = [
+  rung(0, 'gemini', 'flash-lite'),
+  rung(1, 'claude', 'claude-haiku-5-5'),
+  rung(2, 'codex', 'gpt-5.1-codex-mini'),
+  rung(3, 'gemini', 'flash'),
+  rung(4, 'claude', 'claude-sonnet-5-5'),
+  rung(5, 'claude', 'claude-opus-5-5'),
+];
+
 type Reported = [Provider, string | null, number | undefined];
 
 function run(g: FakeAdapter, c: FakeAdapter, k: FakeAdapter, extra: Partial<Parameters<typeof runCouncil>[0]> = {}) {
   const reported: Reported[] = [];
   const promise = runCouncil({
     seats,
+    ladder,
     adapters: registry(k, c, g),
     task: 'rename x to y',
     cwd: 'C:/w',
@@ -42,18 +54,31 @@ test('three seats vote in parallel; the majority decides and every result is rep
   expect(r.counts).toEqual({ easy: 2, medium: 0, hard: 1 });
   expect(r.seats.map((s) => s.vote?.tier)).toEqual(['easy', 'easy', 'hard']);
   expect(r.seats.every((s) => s.costUsd > 0 && s.durationMs >= 0 && !s.overCeiling)).toBe(true);
+  expect(r.pick).toMatchObject({ index: 0, provider: 'gemini', model: 'flash-lite' });
   expect(reported).toHaveLength(3);
   expect(reported).toContainEqual(['gemini', 'flash', 0.001]);
 });
 
-test('seats run tool-less votes with the vote prompt and the JSON schema', async () => {
+test('seats that name a model decide the worker by majority, strongest on a tie', async () => {
+  const { promise } = run(
+    new FakeAdapter('gemini', { events: voteEvents('medium', 0.9, 'r', 0.001, 'claude-sonnet-5-5') }),
+    new FakeAdapter('codex', { events: voteEvents('medium', 0.8, 'r', 0.001, 'claude-sonnet-5-5') }),
+    new FakeAdapter('claude', { events: voteEvents('easy', 0.7, 'r', 0.001, 'claude-haiku-5-5') }),
+  );
+  const r = await promise;
+  expect(r.seats.map((s) => s.vote?.model)).toEqual(['claude-sonnet-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5']);
+  expect(r.pick).toMatchObject({ index: 4, provider: 'claude', model: 'claude-sonnet-5-5', lowConfidence: false });
+});
+
+test('seats run tool-less votes with the vote prompt listing the ladder and the matching JSON schema', async () => {
   const g = new FakeAdapter('gemini', { events: voteEvents('easy') });
   const { promise } = run(g, new FakeAdapter('codex', { events: voteEvents('easy') }), new FakeAdapter('claude', { events: voteEvents('easy') }));
   await promise;
   expect(g.calls).toHaveLength(1);
-  expect(g.calls[0]).toMatchObject({ purpose: 'vote', model: 'flash', cwd: 'C:/w', fullAuto: false, jsonSchema: VOTE_JSON_SCHEMA });
+  expect(g.calls[0]).toMatchObject({ purpose: 'vote', model: 'flash', cwd: 'C:/w', fullAuto: false, jsonSchema: voteSchema(ladder.map((r) => r.model)) });
   expect(g.calls[0]?.prompt).toContain('rename x to y');
   expect(g.calls[0]?.prompt).toContain('Top-level: src/');
+  expect(g.calls[0]?.prompt).toContain('claude-opus-5-5');
 });
 
 test('a seat that throws is recorded as an error and ignored by the tally', async () => {
@@ -145,6 +170,7 @@ test('quota events from seats are reported through onQuota', async () => {
 test('no seats yields medium with an empty seat list', async () => {
   const r = await runCouncil({
     seats: [],
+    ladder: [],
     adapters: registry(new FakeAdapter('claude', { events: [] }), new FakeAdapter('codex', { events: [] }), new FakeAdapter('gemini', { events: [] })),
     task: 't',
     cwd: 'C:/w',
@@ -152,5 +178,5 @@ test('no seats yields medium with an empty seat list', async () => {
     onResult: async () => {},
     pricing: DEFAULT_PRICING,
   });
-  expect(r).toEqual({ seats: [], decision: 'medium', tie: false, counts: { easy: 0, medium: 0, hard: 0 } });
+  expect(r).toEqual({ seats: [], decision: 'medium', tie: false, counts: { easy: 0, medium: 0, hard: 0 }, pick: null });
 });

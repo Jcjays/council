@@ -9,10 +9,10 @@ Everything runs on your machine and talks to the CLIs you already have installed
 ## How a tab works
 
 1. **Describe** the task in a new tab. Pick *Auto* to let the council route it, or pick a model yourself from the model picker (each provider's models, cheapest first, with their prices). Choose *Ask me* or *Auto* for permissions (see below).
-2. **Vote.** Each council seat (by default Gemini Flash, a small Codex model and Claude Haiku) is asked, without tools, to classify the task as easy, medium or hard. Majority wins; a three-way split lands on medium; a two-way tie goes to the higher tier. The vote card shows every seat's answer, confidence, reason and cost.
-3. **Start.** The task is routed to the worker for that tier. If that provider's subscription has used up a usage window (or, for an API key, an optional monthly cap is reached), or its CLI is missing or not signed in, routing shifts to the nearest tier and says so. You can override the pick before starting, or turn on *auto-start* in Settings.
+2. **Vote.** Each council seat (by default Gemini Flash, a small Codex model and Claude Haiku) is asked, without tools, to rate the task's complexity and name the cheapest model on the ladder of set-up models that it is confident can do it. The model most seats named wins, a tie goes to the stronger one, and unsure seats move the pick one rung up. The vote card shows every seat's pick, complexity rating, confidence, reason and cost.
+3. **Start.** The task goes to the chosen model. If that provider's subscription has used up a usage window (or, for an API key, an optional monthly cap is reached), or its CLI is missing or not signed in, the pick moves to the nearest usable rung and the card says so. You can override the pick before starting, or turn on *auto-start* in Settings.
 4. **Work.** The worker runs in your project checkout. Its output, tool calls and cost stream into the tab. In *Ask me* mode a Claude worker stops before running a command and the tab shows an approval card (see Permissions). Follow-up messages resume the same CLI session. Nothing is committed; the changes sit in your working copy like edits you made yourself. Two tabs editing the same files at the same time can collide, so give parallel tabs separate areas of the code.
-5. **Escalate or switch.** If the worker fails, the task is handed one tier up with a short summary of what was tried and the uncommitted diff so far (once, automatically; after that it is your call). *Switch worker* does the same to any provider you choose; switching back resumes the earlier session.
+5. **Escalate or switch.** If the worker fails, the task is handed one rung up the ladder with a short summary of what was tried and the uncommitted diff so far (once, automatically; after that it is your call). *Switch worker* does the same to any provider you choose; switching back resumes the earlier session.
 6. **Review and close.** Look at the changes in your editor or `git diff`, keep or discard them, and close the tab. Closing stops a running worker and leaves the checkout as it is.
 
 ## Requirements
@@ -40,7 +40,7 @@ Council keeps its data in `~/.council` (`settings.json` with only what you chang
 
 ## One, two or three CLIs
 
-Council works with whatever is installed and signed in. With all three, the council and tier map are what Settings says. With one provider, its cheapest model votes alone and the tiers climb that provider's own model ladder (for Claude: easy → Haiku, medium → Sonnet, hard → Opus; the ladders are curated in `server/src/config/models.ts`, cheapest first). With two, a tier whose provider is missing is filled from the nearest configured provider, and a tier that would reuse the rung below it moves one rung up. The vote card says what substitution was made, and the pickers only offer providers that are set up. With none, the app shows the setup panel instead of a composer.
+Council works with whatever is installed and signed in. The models of every set-up provider form one ladder, cheapest first (prices from the fetched table; the per-provider lists are curated in `server/src/config/models.ts`). There is no fixed "easy goes to X" table: each council seat sees the task and that ladder, rates the complexity, and names the cheapest model it is confident can do the job. The model most seats named wins, a tie goes to the stronger one, and if the seats were unsure on average the pick moves one rung up. Escalation climbs the same ladder one rung at a time. With one provider its cheapest model votes alone and the ladder is that provider's own models (for Claude: Haiku, Sonnet, Opus, Fable); with none, the app shows the setup panel instead of a composer. The vote card shows every seat's pick, confidence and reason, and the pickers only offer providers that are set up.
 
 ## Plans, usage and prices
 
@@ -67,8 +67,7 @@ Each tab runs in one of two modes, chosen in the composer; new tabs start in the
 
 The page keeps to what is yours to decide; everything else is detected or sits under *Advanced*.
 
-- **Who does what** – the worker for each tier, picked from the model picker. Defaults: easy → Gemini `flash`, medium → Codex default model, hard → Claude Sonnet.
-- **Council seats** – one to nine cheap models that rate each task. Every task pays for every seat.
+- **Council seats** – one to nine cheap models that judge each task and name the worker. Every task pays for every seat. The ladder they pick from is shown underneath.
 - **Permissions for new tabs** – *Ask me* or *Auto*, as above.
 - **Auto-start / auto-escalate** – whether to skip the pause after a vote, and whether a failed worker escalates once by itself.
 - **Plan & usage** and the **prices** line – what was detected, with *Refresh usage* and *Refresh prices*.

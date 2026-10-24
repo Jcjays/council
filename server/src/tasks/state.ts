@@ -1,5 +1,3 @@
-import type { Tier } from '../adapters/types.js';
-
 export const TAB_STATUSES = ['drafting', 'voting', 'awaiting-start', 'running', 'idle', 'handing-off', 'failed', 'closed'] as const;
 export type TabStatus = (typeof TAB_STATUSES)[number];
 
@@ -44,8 +42,4 @@ export function transition(from: TabStatus, event: TabEvent): TabStatus {
   const next = TABLE[from][event];
   if (!next) throw new InvalidTransition(from, event);
   return next;
-}
-
-export function canEscalate(tier: Tier): boolean {
-  return tier !== 'hard';
 }

@@ -17,11 +17,7 @@ test('the defaults match the spec', () => {
   expect(DEFAULT_SETTINGS.warnPct).toBe(0.8);
   expect(DEFAULT_SETTINGS.resetDay).toBe(1);
   expect(DEFAULT_SETTINGS.seats.map((s) => s.provider)).toEqual(['gemini', 'codex', 'claude']);
-  expect(DEFAULT_SETTINGS.tierMap).toEqual({
-    easy: { provider: 'gemini', model: 'flash' },
-    medium: { provider: 'codex', model: null },
-    hard: { provider: 'claude', model: 'claude-sonnet-5-5' },
-  });
+  expect('tierMap' in DEFAULT_SETTINGS).toBe(false);
   expect(DEFAULT_SETTINGS.autoStart).toBe(false);
   expect(DEFAULT_SETTINGS.autoEscalate).toBe(true);
   expect(DEFAULT_SETTINGS.stallMinutes).toBe(10);
@@ -37,7 +33,7 @@ test('a partial file is merged over the defaults', async () => {
   expect(s.spendCaps).toEqual({ claude: 10, codex: 0, gemini: 0 });
   expect(s.autoStart).toBe(true);
   expect(s.seats).toEqual([{ provider: 'gemini', model: 'flash' }]);
-  expect(s.tierMap).toEqual(DEFAULT_SETTINGS.tierMap);
+  expect(s.models).toEqual(DEFAULT_SETTINGS.models);
   expect(s.permissionMode).toBe('ask');
 });
 

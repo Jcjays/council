@@ -115,7 +115,8 @@ test('GET /api/routing describes the effective council and tier map', async () =
   expect(r.status).toBe(200);
   expect(r.json.available).toBeInstanceOf(Array);
   expect(r.json.seats).toBeInstanceOf(Array);
-  expect(Object.keys(r.json.tierMap).sort()).toEqual(['easy', 'hard', 'medium']);
+  expect(r.json.ladder).toBeInstanceOf(Array);
+  expect(r.json.ladder[0]).toMatchObject({ index: 0, provider: expect.any(String), model: expect.any(String) });
   expect(r.json.notes).toBeInstanceOf(Array);
 });
 

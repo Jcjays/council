@@ -43,7 +43,8 @@ export interface Tab {
   worker: TabWorker | null;
   previousWorkers: TabWorker[];
   vote: CouncilResult | null;
-  routing: { shiftedFrom?: Tier; reason?: string; notes?: string[] } | null;
+  /** Where the worker sits on the ladder of set-up models, and why it moved if it did. */
+  routing: { rung?: number | null; ladderSize?: number; shiftedFrom?: number; reason?: string; notes?: string[] } | null;
   transcript: TranscriptItem[];
   costUsd: number;
   /** Auto mode: the worker runs without asking. Otherwise Claude asks the developer and Codex/Gemini stay in their sandboxes. */

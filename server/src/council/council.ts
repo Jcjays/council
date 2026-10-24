@@ -1,8 +1,9 @@
 import type { Adapter, AdapterEvent, Provider, ProviderPlan, QuotaWindow, ResultEvent, Tier } from '../adapters/types.js';
 import { costFor, type PriceTable } from '../ledger/pricing.js';
+import type { Rung } from './ladder.js';
 import { buildVotePrompt } from './prompt.js';
-import { tally } from './tally.js';
-import { extractVote, VOTE_JSON_SCHEMA, type Vote } from './vote.js';
+import { pickRung, tally, type RungPick } from './tally.js';
+import { extractVote, voteSchema, type Vote } from './vote.js';
 
 export interface Seat {
   provider: Provider;
@@ -20,15 +21,23 @@ export interface SeatResult {
   text?: string;
 }
 
+/** The rung the council settled on, with the worker it names. */
+export type CouncilPick = RungPick & { provider: Provider; model: string };
+
 export interface CouncilResult {
   seats: SeatResult[];
+  /** The complexity verdict (majority of the seats' complexity ratings). */
   decision: Tier;
   tie: boolean;
   counts: Record<Tier, number>;
+  /** The chosen model, or null when no seat voted or the ladder is empty. */
+  pick: CouncilPick | null;
 }
 
 export interface CouncilArgs {
   seats: Seat[];
+  /** The models the seats may choose from, cheapest first. */
+  ladder: Rung[];
   adapters: Record<Provider, Adapter>;
   task: string;
   cwd: string;
@@ -66,7 +75,7 @@ async function* untilAbort<T>(it: AsyncIterable<T>, signal: AbortSignal): AsyncG
   }
 }
 
-async function runSeat(seat: Seat, a: CouncilArgs, prompt: string): Promise<SeatResult> {
+async function runSeat(seat: Seat, a: CouncilArgs, prompt: string, modelIds: string[]): Promise<SeatResult> {
   const timeoutMs = a.timeoutMs ?? DEFAULT_SEAT_TIMEOUT_MS;
   const ceiling = a.costCeiling ?? DEFAULT_VOTE_COST_CEILING;
   const started = Date.now();
@@ -86,7 +95,7 @@ async function runSeat(seat: Seat, a: CouncilArgs, prompt: string): Promise<Seat
       purpose: 'vote',
       fullAuto: false,
       signal: ac.signal,
-      jsonSchema: VOTE_JSON_SCHEMA,
+      jsonSchema: voteSchema(modelIds),
       env: a.env,
     });
     for await (const ev of untilAbort(events, ac.signal)) {
@@ -109,7 +118,7 @@ async function runSeat(seat: Seat, a: CouncilArgs, prompt: string): Promise<Seat
 
   const text = (result?.text ?? streamed).trim();
   const failed = result?.isError === true;
-  const vote = failed || text === '' ? null : extractVote(text);
+  const vote = failed || text === '' ? null : extractVote(text, modelIds);
   if (!vote && !error) error = failed ? text || 'seat failed' : 'no vote in output';
 
   return {
@@ -123,10 +132,15 @@ async function runSeat(seat: Seat, a: CouncilArgs, prompt: string): Promise<Seat
   };
 }
 
-/** Runs every seat in parallel on the same prompt and tallies the votes that came back. */
+/** Runs every seat in parallel on the same prompt, tallies the complexity verdicts and settles on a rung. */
 export async function runCouncil(a: CouncilArgs): Promise<CouncilResult> {
-  const prompt = buildVotePrompt(a.task, a.snapshot);
-  const seats = await Promise.all(a.seats.map((seat) => runSeat(seat, a, prompt)));
-  const t = tally(seats.flatMap((s) => (s.vote ? [s.vote.tier] : [])));
-  return { seats, decision: t.decision, tie: t.tie, counts: t.counts };
+  const prompt = buildVotePrompt(a.task, a.snapshot, a.ladder);
+  const modelIds = a.ladder.map((r) => r.model);
+  const seats = await Promise.all(a.seats.map((seat) => runSeat(seat, a, prompt, modelIds)));
+  const votes = seats.flatMap((s) => (s.vote ? [s.vote] : []));
+  const t = tally(votes.map((v) => v.tier));
+  const picked = pickRung(votes, a.ladder);
+  const rung = picked ? a.ladder[picked.index] : undefined;
+  const pick: CouncilPick | null = picked && rung ? { ...picked, provider: rung.provider, model: rung.model } : null;
+  return { seats, decision: t.decision, tie: t.tie, counts: t.counts, pick };
 }

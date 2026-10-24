@@ -74,7 +74,7 @@ test('statusPhrase derives a phrase, with elapsed time while working', () => {
 });
 
 test('tabChips lists risks and modes', () => {
-  const t = tab({ status: 'running', stalled: true, fullAuto: true, escalations: 2, routing: { shiftedFrom: 'medium', reason: 'Codex budget exhausted' } });
+  const t = tab({ status: 'running', stalled: true, fullAuto: true, escalations: 2, routing: { rung: 3, ladderSize: 6, shiftedFrom: 2, reason: 'Codex budget exhausted' } });
   expect(tabChips(t).map((c) => c.label)).toEqual(['stalled', 'rerouted', 'escalated ×2', 'auto']);
   expect(tabChips(tab({ escalations: 1 })).map((c) => c.label)).toEqual(['escalated']);
   expect(tabChips(tab())).toEqual([]);

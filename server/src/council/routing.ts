@@ -1,57 +1,53 @@
-import { TIER_ORDER, type Provider, type Tier } from '../adapters/types.js';
+import type { Provider, Tier } from '../adapters/types.js';
 import type { BudgetState } from '../ledger/budget.js';
+import { tierOf, type Rung } from './ladder.js';
 
 export interface Worker {
   provider: Provider;
   model: string | null;
 }
 
-export type TierMap = Record<Tier, Worker>;
-
 export interface RouteDecision {
-  tier: Tier;
+  index: number;
   provider: Provider;
-  model: string | null;
-  /** Set when the tier moved because the voted tier's provider was out. */
-  shiftedFrom?: Tier;
+  model: string;
+  tier: Tier;
+  /** Set when the pick moved because its provider could not run. */
+  shiftedFrom?: number;
   reason?: string;
 }
 
 /**
- * Picks the worker for a voted tier. An exhausted or unavailable provider shifts
- * the task to the nearest tier above, then the nearest below. With nothing left,
- * the original tier is kept and the reason says so.
+ * Resolves a ladder pick against what can run right now. A provider that is
+ * exhausted or unavailable moves the pick to the nearest usable rung above,
+ * then (unless `upOnly`) the nearest below. With nothing usable the pick is
+ * kept and the reason says so; `upOnly` returns null instead.
  */
 export function route(
-  tier: Tier,
-  map: TierMap,
+  index: number,
+  ladder: Rung[],
   budgets: Partial<Record<Provider, BudgetState>>,
   unavailable: Provider[] = [],
-): RouteDecision {
+  opts: { upOnly?: boolean } = {},
+): RouteDecision | null {
+  const size = ladder.length;
+  if (size === 0) return null;
+  const at = Math.min(Math.max(0, index), size - 1);
+  const target = ladder[at] as Rung;
+
   const blocked = (p: Provider) => budgets[p]?.exhausted === true || unavailable.includes(p);
   const why = (p: Provider) => (unavailable.includes(p) ? `${p} CLI is not available` : `${p} ${budgets[p]?.reason ?? 'budget is exhausted'}`);
+  const decide = (r: Rung): RouteDecision => ({ index: r.index, provider: r.provider, model: r.model, tier: tierOf(r.index, size) });
 
-  const target = map[tier];
-  if (!blocked(target.provider)) return { tier, provider: target.provider, model: target.model };
+  if (!blocked(target.provider)) return decide(target);
 
-  const idx = TIER_ORDER.indexOf(tier);
-  const candidates: Tier[] = [...TIER_ORDER.slice(idx + 1), ...TIER_ORDER.slice(0, idx).reverse()];
-  for (const t of candidates) {
-    const worker = map[t];
-    if (!blocked(worker.provider)) {
-      return {
-        tier: t,
-        provider: worker.provider,
-        model: worker.model,
-        shiftedFrom: tier,
-        reason: `${why(target.provider)}; routed ${tier} to ${t}`,
-      };
+  const up = ladder.slice(at + 1);
+  const down = opts.upOnly ? [] : ladder.slice(0, at).reverse();
+  for (const rung of [...up, ...down]) {
+    if (!blocked(rung.provider)) {
+      return { ...decide(rung), shiftedFrom: at, reason: `${why(target.provider)}; moved from ${target.label} to ${rung.label}` };
     }
   }
-  return {
-    tier,
-    provider: target.provider,
-    model: target.model,
-    reason: `every provider is exhausted or unavailable; keeping ${tier} on ${target.provider}`,
-  };
+  if (opts.upOnly) return null;
+  return { ...decide(target), reason: `every provider is exhausted or unavailable; keeping ${target.label}` };
 }

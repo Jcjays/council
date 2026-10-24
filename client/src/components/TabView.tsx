@@ -51,7 +51,8 @@ export function TabView({ tab, settings, catalog, available, stallSeq, details, 
   };
 
   const settled = tab.status === 'idle' || tab.status === 'failed';
-  const canEscalate = settled && tab.tier !== null && tab.tier !== 'hard';
+  const rungAbove = tab.routing?.rung != null && tab.routing.ladderSize != null && tab.routing.rung < tab.routing.ladderSize - 1;
+  const canEscalate = settled && rungAbove;
   const askingAboutStall = shouldAskAboutStall(tab, stallSeq, dismissedStall);
   const chips = tabChips(tab);
   const drafting = tab.status === 'drafting' && tab.transcript.length === 0;
@@ -157,8 +158,8 @@ export function TabView({ tab, settings, catalog, available, stallSeq, details, 
           {askingAboutStall && (
             <div className="card warn inline-form" role="status">
               <span>{stallMessage(settings.stallMinutes)}. The worker may be stuck.</span>
-              {tab.tier !== null && tab.tier !== 'hard' && (
-                <button disabled={busy} className="primary" onClick={() => void act(() => api.escalate(tab.id))} title="Stop this worker and hand the task to the next tier up">
+              {rungAbove && (
+                <button disabled={busy} className="primary" onClick={() => void act(() => api.escalate(tab.id))} title="Stop this worker and hand the task to the next model up the ladder">
                   Escalate
                 </button>
               )}

@@ -7,7 +7,6 @@ import { pricesLine } from '../lib/plan';
 import { isSetUp, type Availability } from '../lib/routing';
 import {
   PROVIDERS,
-  TIERS,
   type BudgetState,
   type CliHealth,
   type EffectiveRouting,
@@ -16,7 +15,6 @@ import {
   type PricingStatus,
   type Provider,
   type Settings as SettingsT,
-  type Tier,
 } from '../types';
 import { Glyph } from './Glyph';
 import { Health } from './Health';
@@ -37,10 +35,8 @@ interface Props {
   onError: (m: string) => void;
 }
 
-const TIER_WORDS: Record<Tier, string> = { easy: 'Easy tasks go to', medium: 'Medium tasks go to', hard: 'Hard tasks go to' };
-
 /** The fields this page edits; nothing else is sent on Save. */
-const EDITABLE = ['tierMap', 'seats', 'permissionMode', 'autoStart', 'autoEscalate', 'spendCaps', 'warnPct', 'resetDay', 'seatTimeoutMs', 'voteCostCeiling', 'stallMinutes'] as const;
+const EDITABLE = ['seats', 'permissionMode', 'autoStart', 'autoEscalate', 'spendCaps', 'warnPct', 'resetDay', 'seatTimeoutMs', 'voteCostCeiling', 'stallMinutes'] as const;
 type Editable = Pick<SettingsT, (typeof EDITABLE)[number]>;
 
 function editable(s: SettingsT): Editable {
@@ -208,30 +204,19 @@ export function Settings({ settings, onSaved, health, available, routing, budget
         </div>
       )}
 
-      <section className="card" id="s-routing" aria-labelledby="s-routing-h">
-        <header className="card-title" id="s-routing-h">
-          Who does what
-        </header>
-        <p className="muted sm">The council rates each task easy, medium or hard; this is who then works on it.</p>
-        {TIERS.map((t) => (
-          <div key={t} className="tier-row">
-            <span className={`tier tier-${t}`}>{t}</span>
-            <span className="sec tier-word">{TIER_WORDS[t]}</span>
-            <ModelPicker value={s.tierMap[t]} onChange={(pick) => setS({ ...s, tierMap: { ...s.tierMap, [t]: pick } })} catalog={catalog} available={available} ariaLabel={`${t} tasks: worker`} />
-            {routing && !isSetUp(available, s.tierMap[t].provider) && (
-              <span className="muted xs">
-                {PROVIDER_NAMES[s.tierMap[t].provider]} is not set up; for now {PROVIDER_NAMES[routing.tierMap[t].provider]} · {modelLabel(catalog, routing.tierMap[t].provider, routing.tierMap[t].model)} takes these
-              </span>
-            )}
-          </div>
-        ))}
-      </section>
-
       <section className="card" id="s-seats" aria-labelledby="s-seats-h">
         <header className="card-title" id="s-seats-h">
           Council seats
         </header>
-        <p className="muted sm">The models that rate each task. Every task pays for every seat, so keep them cheap.</p>
+        <p className="muted sm">
+          The models that judge each task. Every seat sees the task and the models that are set up, weighs the complexity, and names the cheapest model it is confident
+          can do it; the pick with the most seats wins, and unsure seats move it one rung up. Every task pays for every seat, so keep them cheap.
+        </p>
+        {routing && routing.ladder.length > 0 && (
+          <p className="muted xs" title="Escalation climbs this list one rung at a time">
+            They pick from, cheapest first: {routing.ladder.map((r) => r.label).join(' → ')}.
+          </p>
+        )}
         <div className="seat-chips">
           {s.seats.map((seat, i) => {
             const m = catalog?.[seat.provider]?.find((c) => c.id === seat.model);

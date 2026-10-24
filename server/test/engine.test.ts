@@ -22,9 +22,17 @@ function summaryEvents(text: string): AdapterEvent[] {
   ];
 }
 
-function scripted(provider: Provider, tier: string, scripts: Scripts = {}): FakeAdapter {
+/** The model a scripted seat names for a complexity, unless the test says otherwise. */
+const DEFAULT_PICK: Record<Provider, Record<string, string>> = {
+  gemini: { easy: 'flash', medium: 'flash', hard: 'pro' },
+  codex: { easy: 'gpt-5.1-codex-mini', medium: 'gpt-5.1-codex', hard: 'gpt-5.5' },
+  claude: { easy: 'claude-haiku-5-5', medium: 'claude-sonnet-5-5', hard: 'claude-sonnet-5-5' },
+};
+
+function scripted(provider: Provider, tier: string, scripts: Scripts = {}, model?: string | null): FakeAdapter {
+  const pick = model === undefined ? (DEFAULT_PICK[provider][tier] ?? null) : model;
   return new FakeAdapter(provider, (opts: RunOptions) => {
-    if (opts.purpose === 'vote') return scripts.vote ?? { events: voteEvents(tier) };
+    if (opts.purpose === 'vote') return scripts.vote ?? { events: voteEvents(tier, 0.8, 'because', 0.001, pick) };
     if (opts.purpose === 'summarize') return scripts.summarize ?? { events: summaryEvents('SUMMARY TEXT') };
     return scripts.work ?? { events: workEvents(`${provider}-session`, `${provider} did it`) };
   });
@@ -43,7 +51,7 @@ function setup(
   const ledgerFile = path.join(home, 'ledger.jsonl');
   const adapters: Record<Provider, FakeAdapter> = {
     gemini: opts.adapters?.gemini ?? scripted('gemini', 'easy'),
-    codex: opts.adapters?.codex ?? scripted('codex', 'easy'),
+    codex: opts.adapters?.codex ?? scripted('codex', 'easy', {}, 'flash'),
     claude: opts.adapters?.claude ?? scripted('claude', 'hard'),
   };
   const settings: Settings = { ...DEFAULT_SETTINGS, ...opts.settings };
@@ -121,13 +129,14 @@ test('autoStart skips the pause and runs straight after the vote', async () => {
   expect(idle.transcript.some((i) => i.kind === 'result')).toBe(true);
 });
 
-test('manual submit skips the council and derives the tier from the chosen provider', async () => {
+test('manual submit skips the council and derives the tier from where the model sits on the ladder', async () => {
   const { engine, ledgerFile } = setup();
   const tab = await engine.createTab('C:/proj', 't');
   await engine.submit(tab.id, 'do it', { kind: 'manual', provider: 'claude', model: 'claude-sonnet-5-5' }, { fullAuto: true });
   const idle = await waitFor(engine, tab.id, ['idle']);
   expect(idle.vote).toBeNull();
   expect(idle.tier).toBe('hard');
+  expect(idle.routing).toMatchObject({ rung: expect.any(Number), ladderSize: 10 });
   expect(idle.worker).toMatchObject({ provider: 'claude', model: 'claude-sonnet-5-5', sessionId: 'claude-session' });
   expect(idle.fullAuto).toBe(true);
   const entries = await readEntries(ledgerFile);
@@ -148,22 +157,22 @@ test('a follow-up message resumes the worker session', async () => {
   expect(idle.transcript.filter((i) => i.kind === 'user').map((i) => i.text)).toEqual(['first', 'and also this']);
 });
 
-test('a worker failure auto-escalates once with a summary hand-off, and a second failure stops', async () => {
+test('a worker failure auto-escalates once to the next rung with a summary hand-off, and a second failure stops', async () => {
   const gemini = scripted('gemini', 'easy', { work: { events: failEvents('g-sess', 'gemini exploded') } });
-  const codex = scripted('codex', 'easy', { work: { events: failEvents('c-sess', 'codex exploded') } });
-  const { engine, ledgerFile } = setup({ settings: { autoStart: true }, adapters: { gemini, codex } });
+  const { engine, ledgerFile } = setup({ settings: { autoStart: true }, adapters: { gemini } });
   const tab = await engine.createTab('C:/proj', 'Hard thing');
   await engine.submit(tab.id, 'Hard thing please', { kind: 'auto' });
   const failed = await waitFor(engine, tab.id, ['failed'], 8000);
-  expect(failed.worker?.provider).toBe('codex');
+  // Flash sits one rung below Pro on the default ladder, so the escalation stays on Gemini.
+  expect(failed.worker).toMatchObject({ provider: 'gemini', model: 'pro' });
   expect(failed.tier).toBe('medium');
   expect(failed.escalations).toBe(1);
   expect(failed.previousWorkers).toEqual([{ provider: 'gemini', model: 'flash', sessionId: 'g-sess' }]);
-  const handoff = codex.calls.find((c) => c.purpose === 'work');
+  const handoff = gemini.calls.filter((c) => c.purpose === 'work')[1];
   expect(handoff?.prompt).toContain('SUMMARY TEXT');
   expect(handoff?.prompt).toContain(' a.txt | 1 +');
   expect(handoff?.prompt).toContain('Hard thing please');
-  expect(handoff?.resumeId).toBeUndefined();
+  expect(handoff?.model).toBe('pro');
   const purposes = (await readEntries(ledgerFile)).map((e) => e.purpose);
   expect(purposes.filter((p) => p === 'summarize')).toHaveLength(1);
   expect(purposes.filter((p) => p === 'work')).toHaveLength(2);
@@ -221,7 +230,7 @@ test('changing only the model keeps the session and takes effect on the next mes
 
 test('closing a running tab aborts the worker and applies no further events', async () => {
   const slow = new FakeAdapter('gemini', (opts: RunOptions) =>
-    opts.purpose === 'vote' ? { events: voteEvents('easy') } : { events: workEvents(), delayMs: 150 },
+    opts.purpose === 'vote' ? { events: voteEvents('easy', 0.8, 'because', 0.001, 'flash') } : { events: workEvents(), delayMs: 150 },
   );
   const { engine } = setup({ settings: { autoStart: true }, adapters: { gemini: slow } });
   const tab = await engine.createTab('C:/proj', 't');
@@ -249,7 +258,7 @@ test('workers run in the project checkout itself; tabs carry no worktree', async
 
 test('a silent worker trips the stall flag once, and output clears it', async () => {
   const slow = new FakeAdapter('gemini', (opts: RunOptions) =>
-    opts.purpose === 'vote' ? { events: voteEvents('easy') } : { events: workEvents(), delayMs: 120 },
+    opts.purpose === 'vote' ? { events: voteEvents('easy', 0.8, 'because', 0.001, 'flash') } : { events: workEvents(), delayMs: 120 },
   );
   const { engine } = setup({ settings: { autoStart: true, stallMinutes: 0.001 }, adapters: { gemini: slow } });
   const stalls: string[] = [];
@@ -261,8 +270,8 @@ test('a silent worker trips the stall flag once, and output clears it', async ()
   expect(idle.stalled).toBe(false);
 });
 
-test('an unavailable provider drops out of the council and its tier is served by the nearest one', async () => {
-  const { engine } = setup({ health: { gemini: false }, adapters: { claude: scripted('claude', 'easy') } });
+test('an unavailable provider drops out of the council and off the ladder', async () => {
+  const { engine } = setup({ health: { gemini: false }, adapters: { claude: scripted('claude', 'easy', {}, 'gpt-5.1-codex-mini') } });
   const tab = await engine.createTab('C:/proj', 't');
   await engine.submit(tab.id, 'tiny change', { kind: 'auto' });
   const voted = await waitFor(engine, tab.id, ['awaiting-start']);
@@ -274,7 +283,7 @@ test('an unavailable provider drops out of the council and its tier is served by
   expect(voted.routing?.notes?.join(' ')).toMatch(/gemini/i);
 });
 
-test('an exhausted budget still shifts the tier even when every CLI is set up', async () => {
+test('an exhausted budget moves the pick up the ladder even when every CLI is set up', async () => {
   const { engine } = setup({ settings: { spendCaps: { claude: 0, codex: 0, gemini: 0.0001 } } });
   const first = await engine.createTab('C:/proj', 'warm-up');
   await engine.submit(first.id, 'x', { kind: 'auto' });
@@ -282,16 +291,16 @@ test('an exhausted budget still shifts the tier even when every CLI is set up', 
   const tab = await engine.createTab('C:/proj', 't');
   await engine.submit(tab.id, 'tiny change', { kind: 'auto' });
   const voted = await waitFor(engine, tab.id, ['awaiting-start']);
-  expect(voted.vote?.decision).toBe('easy');
-  expect(voted.tier).toBe('medium');
-  expect(voted.routing).toMatchObject({ shiftedFrom: 'easy', reason: expect.stringContaining('gemini') });
+  expect(voted.vote?.pick?.provider).toBe('gemini');
+  expect(voted.worker?.provider).not.toBe('gemini');
+  expect(voted.routing).toMatchObject({ shiftedFrom: expect.any(Number), reason: expect.stringContaining('gemini') });
 });
 
 test('a worker that exits 0 but reports failure in-band still fails the tab and is ledgered', async () => {
   const text = JSON.stringify({ tier: 'easy', confidence: 0.9, reason: 'r' });
   const inBand = new FakeAdapter('gemini', (opts: RunOptions) =>
     opts.purpose === 'vote'
-      ? { events: voteEvents('easy') }
+      ? { events: voteEvents('easy', 0.8, 'because', 0.001, 'flash') }
       : {
           events: [
             { type: 'session', id: 's' },
@@ -316,7 +325,7 @@ test('streaming many events emits few full-tab updates and clips oversized tool 
   events.push({ type: 'tool', id: 't1', name: 'Read', input: { file_path: 'big.txt' } });
   events.push({ type: 'tool_result', id: 't1', output: 'x'.repeat(100_000) });
   events.push({ type: 'result', usage: { inputTokens: 1, cachedInputTokens: 0, outputTokens: 1 }, costUsd: 0.001, exitCode: 0, isError: false, text: 'done' });
-  const chatty = new FakeAdapter('gemini', (opts: RunOptions) => (opts.purpose === 'vote' ? { events: voteEvents('easy') } : { events }));
+  const chatty = new FakeAdapter('gemini', (opts: RunOptions) => (opts.purpose === 'vote' ? { events: voteEvents('easy', 0.8, 'because', 0.001, 'flash') } : { events }));
   const { engine } = setup({ settings: { autoStart: true }, adapters: { gemini: chatty } });
   let tabEmits = 0;
   let itemEmits = 0;
@@ -402,15 +411,16 @@ test('a subscription whose usage window is used up is routed around until it res
   const usage = new UsageStore();
   usage.notePlan('claude', SUBSCRIPTION);
   usage.noteUsage('claude', { windows: [{ name: '5-hour', usedPct: 1, resetsAt: inAnHour() }], observedAt: new Date().toISOString() });
-  const adapters = { gemini: scripted('gemini', 'hard'), codex: scripted('codex', 'hard'), claude: scripted('claude', 'hard') };
+  const sonnet = 'claude-sonnet-5-5';
+  const adapters = { gemini: scripted('gemini', 'hard', {}, sonnet), codex: scripted('codex', 'hard', {}, sonnet), claude: scripted('claude', 'hard', {}, sonnet) };
   const { engine } = setup({ usage, adapters });
   const tab = await engine.createTab('C:/proj', 't');
   await engine.submit(tab.id, 'big refactor', { kind: 'auto' });
   const voted = await waitFor(engine, tab.id, ['awaiting-start']);
   expect(voted.vote?.decision).toBe('hard');
-  expect(voted.tier).toBe('medium');
+  expect(voted.vote?.pick).toMatchObject({ provider: 'claude', model: sonnet });
   expect(voted.worker?.provider).toBe('codex');
-  expect(voted.routing?.reason).toBe('claude has used up its 5-hour window; routed hard to medium');
+  expect(voted.routing?.reason).toContain('claude has used up its 5-hour window');
 });
 
 test('Refresh usage runs the cheapest probe on each set-up CLI that reports usage, and ledgers it', async () => {

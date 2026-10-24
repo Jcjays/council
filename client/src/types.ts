@@ -53,7 +53,8 @@ export interface Seat {
 
 export interface SeatResult {
   seat: Seat;
-  vote: { tier: Tier; confidence: number; reason: string } | null;
+  /** `model` is the ladder model the seat chose (null when it named none); `tier` is its complexity verdict. */
+  vote: { model: string | null; tier: Tier; confidence: number; reason: string } | null;
   costUsd: number;
   durationMs: number;
   error?: string;
@@ -61,11 +62,31 @@ export interface SeatResult {
   text?: string;
 }
 
+/** The rung the council settled on and why. */
+export interface CouncilPick {
+  index: number;
+  reason: string;
+  lowConfidence: boolean;
+  provider: Provider;
+  model: string;
+}
+
 export interface CouncilResult {
   seats: SeatResult[];
   decision: Tier;
   tie: boolean;
   counts: Record<Tier, number>;
+  pick: CouncilPick | null;
+}
+
+/** One model on the ladder the council chooses from: every set-up provider's models, cheapest first. */
+export interface Rung {
+  index: number;
+  provider: Provider;
+  model: string;
+  label: string;
+  note?: string;
+  price?: ModelPrice;
 }
 
 export interface Tab {
@@ -78,7 +99,8 @@ export interface Tab {
   worker: TabWorker | null;
   previousWorkers: TabWorker[];
   vote: CouncilResult | null;
-  routing: { shiftedFrom?: Tier; reason?: string; notes?: string[] } | null;
+  /** Where the worker sits on the ladder (`rung` of `ladderSize`) and why it moved, if it did. */
+  routing: { rung?: number | null; ladderSize?: number; shiftedFrom?: number; reason?: string; notes?: string[] } | null;
   transcript: TranscriptItem[];
   costUsd: number;
   /** Auto mode: no prompts and no sandbox. */
@@ -173,7 +195,6 @@ export interface Settings {
   warnPct: number;
   resetDay: number;
   seats: Seat[];
-  tierMap: Record<Tier, Seat>;
   autoStart: boolean;
   autoEscalate: boolean;
   stallMinutes: number;
@@ -189,7 +210,8 @@ export interface Settings {
 export interface EffectiveRouting {
   available: Provider[];
   seats: Seat[];
-  tierMap: Record<Tier, Seat>;
+  /** Every model the council may pick from, cheapest first. */
+  ladder: Rung[];
   notes: string[];
 }
 
