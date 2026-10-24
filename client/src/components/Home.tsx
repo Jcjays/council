@@ -22,11 +22,11 @@ export function Steps() {
     <div className="steps" aria-label="How a tab works">
       <div className="step">
         <b>1 · Vote</b>
-        <span>Cheap seats rate the task easy, medium or hard.</span>
+        <span>Cheap seats weigh the task and each names the cheapest model it trusts with it.</span>
       </div>
       <div className="step">
         <b>2 · Route</b>
-        <span>The cheapest worker for that tier gets it: Gemini, Codex or Claude.</span>
+        <span>The model most seats chose gets the task, from whichever of Gemini, Codex or Claude is set up.</span>
       </div>
       <div className="step">
         <b>3 · Review</b>

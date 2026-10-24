@@ -276,7 +276,7 @@ export function Settings({ settings, onSaved, health, available, routing, budget
             <input type="checkbox" checked={s.autoStart} onChange={(e) => setS({ ...s, autoStart: e.target.checked })} /> Start the worker right after the vote
           </label>
           <label>
-            <input type="checkbox" checked={s.autoEscalate} onChange={(e) => setS({ ...s, autoEscalate: e.target.checked })} /> If a worker fails, hand the task up one tier once
+            <input type="checkbox" checked={s.autoEscalate} onChange={(e) => setS({ ...s, autoEscalate: e.target.checked })} /> If a worker fails, hand the task one model up the ladder once
           </label>
         </div>
       </section>
